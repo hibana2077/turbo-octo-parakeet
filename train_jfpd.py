@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--alpha", type=float, default=0.5)
     parser.add_argument("--proto-samples-per-class", type=int, default=32)
     parser.add_argument("--proto-forward-batch-size", type=int, default=256)
+    parser.add_argument("--proto-ema-decay", type=float, default=0.9)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None)
     parser.add_argument("--output-dir", default="outputs/jfpd")
@@ -33,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-target-train-samples", type=int, default=None)
     parser.add_argument("--max-target-test-samples", type=int, default=None)
     parser.add_argument("--max-source-test-samples", type=int, default=None)
+    parser.add_argument("--class-limit", type=int, default=None)
     parser.add_argument("--eval-source", action="store_true")
     args = parser.parse_args()
     validate_args(args)
@@ -51,6 +53,12 @@ def validate_args(args: argparse.Namespace) -> None:
 
     if is_officehome_dataset(args.dataset_name) and args.dataset_root is None:
         raise ValueError("--dataset-root is required when --dataset-name is OfficeHome.")
+
+    if not (0.0 <= args.proto_ema_decay < 1.0):
+        raise ValueError("--proto-ema-decay must be in the range [0, 1).")
+
+    if args.class_limit is not None and args.class_limit <= 0:
+        raise ValueError("--class-limit must be a positive integer.")
 
 
 def args_to_config(args: argparse.Namespace):
@@ -75,6 +83,7 @@ def args_to_config(args: argparse.Namespace):
         alpha=args.alpha,
         proto_samples_per_class=args.proto_samples_per_class,
         proto_forward_batch_size=args.proto_forward_batch_size,
+        proto_ema_decay=args.proto_ema_decay,
         seed=args.seed,
         device=args.device,
         output_dir=args.output_dir,
@@ -82,6 +91,7 @@ def args_to_config(args: argparse.Namespace):
         max_target_train_samples=args.max_target_train_samples,
         max_target_test_samples=args.max_target_test_samples,
         max_source_test_samples=args.max_source_test_samples,
+        class_limit=args.class_limit,
         eval_source=args.eval_source,
     )
 

@@ -1,4 +1,5 @@
 import random
+from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -120,6 +121,52 @@ def maybe_limit_dataset(dataset: Dataset, limit: Optional[int]) -> Dataset:
     return dataset.select(range(limit))
 
 
+def _sample_class_ids(shared_class_ids: Sequence[int], class_limit: Optional[int], seed: int) -> Optional[List[int]]:
+    if class_limit is None:
+        return None
+    if class_limit > len(shared_class_ids):
+        raise ValueError(
+            f"class_limit={class_limit} exceeds the number of shared classes available ({len(shared_class_ids)})."
+        )
+    rng = random.Random(seed)
+    return sorted(rng.sample(list(shared_class_ids), class_limit))
+
+
+def _filter_dataset_to_classes(dataset: Dataset, class_ids: Sequence[int]) -> Dataset:
+    class_id_set = set(class_ids)
+    selected_indices = [index for index, label in enumerate(dataset["label"]) if int(label) in class_id_set]
+    filtered = dataset.select(selected_indices)
+
+    original_names = get_class_names(dataset, "label")
+    label_mapping = {class_id: new_id for new_id, class_id in enumerate(class_ids)}
+    updated_features = deepcopy(filtered.features)
+    updated_features["label"] = ClassLabel(names=[original_names[class_id] for class_id in class_ids])
+
+    return filtered.map(
+        lambda example: {"label": label_mapping[int(example["label"])]},
+        features=updated_features,
+    )
+
+
+def maybe_limit_classes(
+    splits: Dict[str, Dataset],
+    class_limit: Optional[int],
+    seed: int,
+) -> Dict[str, Dataset]:
+    if class_limit is None:
+        return splits
+
+    shared_class_ids = sorted(set.intersection(*(set(int(label) for label in dataset["label"]) for dataset in splits.values())))
+    selected_class_ids = _sample_class_ids(shared_class_ids, class_limit=class_limit, seed=seed)
+    if selected_class_ids is None:
+        return splits
+
+    return {
+        split_name: _filter_dataset_to_classes(dataset, selected_class_ids)
+        for split_name, dataset in splits.items()
+    }
+
+
 def validate_domain_names(dataset_name: str, source_domain: str, target_domain: str) -> None:
     if is_officehome_dataset(dataset_name):
         valid_domains = OFFICEHOME_DOMAINS
@@ -138,6 +185,8 @@ def load_domainnet_splits(
     source_domain: str,
     target_domain: str,
     limits: Dict[str, Optional[int]],
+    class_limit: Optional[int],
+    seed: int,
 ) -> Dict[str, Dataset]:
     train_split = load_dataset(dataset_name, split="train", cache_dir=cache_dir)
     test_split = load_dataset(dataset_name, split="test", cache_dir=cache_dir)
@@ -156,12 +205,13 @@ def load_domainnet_splits(
     target_test = maybe_limit_dataset(target_test, limits["target_test"])
     source_test = maybe_limit_dataset(source_test, limits["source_test"])
 
-    return {
+    splits = {
         "source_train": source_train,
         "target_train": target_train,
         "target_test": target_test,
         "source_test": source_test,
     }
+    return maybe_limit_classes(splits, class_limit=class_limit, seed=seed)
 
 
 def _build_image_dataset(image_paths: Sequence[str], labels: Sequence[int], label_names: Sequence[str]) -> Dataset:
@@ -258,6 +308,7 @@ def load_officehome_splits(
     limits: Dict[str, Optional[int]],
     train_split_ratio: float,
     seed: int,
+    class_limit: Optional[int],
 ) -> Dict[str, Dataset]:
     root_path = Path(dataset_root)
     if not root_path.is_dir():
@@ -284,12 +335,13 @@ def load_officehome_splits(
     target_test = maybe_limit_dataset(target_splits["test"], limits["target_test"])
     source_test = maybe_limit_dataset(source_splits["test"], limits["source_test"])
 
-    return {
+    splits = {
         "source_train": source_train,
         "target_train": target_train,
         "target_test": target_test,
         "source_test": source_test,
     }
+    return maybe_limit_classes(splits, class_limit=class_limit, seed=seed)
 
 
 def load_dataset_splits(
@@ -301,6 +353,7 @@ def load_dataset_splits(
     limits: Dict[str, Optional[int]],
     train_split_ratio: float,
     seed: int,
+    class_limit: Optional[int] = None,
 ) -> Dict[str, Dataset]:
     validate_domain_names(dataset_name, source_domain, target_domain)
     if is_officehome_dataset(dataset_name):
@@ -313,6 +366,7 @@ def load_dataset_splits(
             limits=limits,
             train_split_ratio=train_split_ratio,
             seed=seed,
+            class_limit=class_limit,
         )
     return load_domainnet_splits(
         dataset_name=dataset_name,
@@ -320,4 +374,6 @@ def load_dataset_splits(
         source_domain=source_domain,
         target_domain=target_domain,
         limits=limits,
+        class_limit=class_limit,
+        seed=seed,
     )

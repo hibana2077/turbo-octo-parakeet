@@ -29,6 +29,7 @@ class JFPDConfig:
     alpha: float = 0.5
     proto_samples_per_class: int = 32
     proto_forward_batch_size: int = 256
+    proto_ema_decay: float = 0.9
     seed: int = 42
     device: Optional[str] = None
     output_dir: str = "outputs/jfpd"
@@ -36,6 +37,7 @@ class JFPDConfig:
     max_target_train_samples: Optional[int] = None
     max_target_test_samples: Optional[int] = None
     max_source_test_samples: Optional[int] = None
+    class_limit: Optional[int] = None
     eval_source: bool = False
 
 
