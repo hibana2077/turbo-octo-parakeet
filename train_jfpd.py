@@ -3,17 +3,17 @@
 import argparse
 
 from jfpd.losses import entropy_from_prob, jfpd_loss, normalized_feature_divergence
-
-
-DOMAINNET_DOMAINS = ("clipart", "infograph", "painting", "quickdraw", "real", "sketch")
+from jfpd.config import DOMAINNET_DOMAINS, OFFICEHOME_DOMAINS, is_officehome_dataset
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Version B JFPD pipeline for DomainNet.")
+    parser = argparse.ArgumentParser(description="Version B JFPD pipeline for domain adaptation datasets.")
     parser.add_argument("--dataset-name", default="wltjr1007/DomainNet")
+    parser.add_argument("--dataset-root", default=None)
     parser.add_argument("--cache-dir", default=None)
-    parser.add_argument("--source-domain", required=True, choices=DOMAINNET_DOMAINS)
-    parser.add_argument("--target-domain", required=True, choices=DOMAINNET_DOMAINS)
+    parser.add_argument("--source-domain", required=True)
+    parser.add_argument("--target-domain", required=True)
+    parser.add_argument("--train-split-ratio", type=float, default=0.8)
     parser.add_argument("--model-name", default="vit_base_patch16_clip_224.laion2b_ft_in12k_in1k")
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -34,7 +34,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-target-test-samples", type=int, default=None)
     parser.add_argument("--max-source-test-samples", type=int, default=None)
     parser.add_argument("--eval-source", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    validate_args(args)
+    return args
+
+
+def validate_args(args: argparse.Namespace) -> None:
+    if not (0.0 < args.train_split_ratio < 1.0):
+        raise ValueError("--train-split-ratio must be between 0 and 1.")
+
+    valid_domains = OFFICEHOME_DOMAINS if is_officehome_dataset(args.dataset_name) else DOMAINNET_DOMAINS
+    for name, value in (("source", args.source_domain), ("target", args.target_domain)):
+        if value not in valid_domains:
+            joined = ", ".join(valid_domains)
+            raise ValueError(f"--{name}-domain '{value}' is invalid for dataset '{args.dataset_name}'. Expected one of: {joined}")
+
+    if is_officehome_dataset(args.dataset_name) and args.dataset_root is None:
+        raise ValueError("--dataset-root is required when --dataset-name is OfficeHome.")
 
 
 def args_to_config(args: argparse.Namespace):
@@ -42,9 +58,11 @@ def args_to_config(args: argparse.Namespace):
 
     return JFPDConfig(
         dataset_name=args.dataset_name,
+        dataset_root=args.dataset_root,
         cache_dir=args.cache_dir,
         source_domain=args.source_domain,
         target_domain=args.target_domain,
+        train_split_ratio=args.train_split_ratio,
         model_name=args.model_name,
         image_size=args.image_size,
         batch_size=args.batch_size,

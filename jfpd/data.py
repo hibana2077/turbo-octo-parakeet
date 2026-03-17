@@ -1,14 +1,15 @@
 import random
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
-from datasets import Dataset, load_dataset
+from datasets import ClassLabel, Dataset, Features, Image as HFImage, Value, load_dataset
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset as TorchDataset
 from torchvision import transforms
 
-from .config import DOMAINNET_DOMAINS, IMAGENET_MEAN, IMAGENET_STD
+from .config import DOMAINNET_DOMAINS, IMAGENET_MEAN, IMAGENET_STD, OFFICEHOME_DOMAINS, is_officehome_dataset
 
 
 def build_transform(image_size: int, is_train: bool) -> transforms.Compose:
@@ -119,6 +120,18 @@ def maybe_limit_dataset(dataset: Dataset, limit: Optional[int]) -> Dataset:
     return dataset.select(range(limit))
 
 
+def validate_domain_names(dataset_name: str, source_domain: str, target_domain: str) -> None:
+    if is_officehome_dataset(dataset_name):
+        valid_domains = OFFICEHOME_DOMAINS
+    else:
+        valid_domains = DOMAINNET_DOMAINS
+
+    invalid_domains = [domain for domain in (source_domain, target_domain) if domain not in valid_domains]
+    if invalid_domains:
+        joined = ", ".join(valid_domains)
+        raise ValueError(f"Invalid domain(s) for dataset '{dataset_name}': {invalid_domains}. Expected one of: {joined}")
+
+
 def load_domainnet_splits(
     dataset_name: str,
     cache_dir: Optional[str],
@@ -149,3 +162,162 @@ def load_domainnet_splits(
         "target_test": target_test,
         "source_test": source_test,
     }
+
+
+def _build_image_dataset(image_paths: Sequence[str], labels: Sequence[int], label_names: Sequence[str]) -> Dataset:
+    features = Features(
+        {
+            "image": HFImage(),
+            "label": ClassLabel(names=list(label_names)),
+            "path": Value("string"),
+        }
+    )
+    return Dataset.from_dict(
+        {
+            "image": list(image_paths),
+            "label": list(labels),
+            "path": list(image_paths),
+        },
+        features=features,
+    )
+
+
+def _list_officehome_class_names(dataset_root: Path, domains: Sequence[str]) -> List[str]:
+    class_names = set()
+    for domain in domains:
+        domain_dir = dataset_root / domain
+        if not domain_dir.is_dir():
+            raise FileNotFoundError(f"OfficeHome domain directory not found: {domain_dir}")
+        for class_dir in domain_dir.iterdir():
+            if class_dir.is_dir():
+                class_names.add(class_dir.name)
+
+    if not class_names:
+        raise ValueError(f"No class directories found under OfficeHome root: {dataset_root}")
+    return sorted(class_names)
+
+
+def _split_indices(num_examples: int, train_split_ratio: float, rng: random.Random) -> Tuple[List[int], List[int]]:
+    indices = list(range(num_examples))
+    rng.shuffle(indices)
+    if num_examples <= 1:
+        return indices, indices
+
+    train_count = int(round(num_examples * train_split_ratio))
+    train_count = min(max(train_count, 1), num_examples - 1)
+    return indices[:train_count], indices[train_count:]
+
+
+def _collect_officehome_domain_dataset(
+    dataset_root: Path,
+    domain: str,
+    label_names: Sequence[str],
+    train_split_ratio: float,
+    seed: int,
+) -> Dict[str, Dataset]:
+    label_to_id = {label_name: index for index, label_name in enumerate(label_names)}
+    train_paths: List[str] = []
+    train_labels: List[int] = []
+    test_paths: List[str] = []
+    test_labels: List[int] = []
+
+    domain_dir = dataset_root / domain
+    for class_name in label_names:
+        class_dir = domain_dir / class_name
+        if not class_dir.is_dir():
+            continue
+
+        image_paths = sorted(str(path) for path in class_dir.iterdir() if path.is_file())
+        if not image_paths:
+            continue
+
+        rng = random.Random(f"{seed}:{domain}:{class_name}")
+        train_indices, test_indices = _split_indices(len(image_paths), train_split_ratio=train_split_ratio, rng=rng)
+        class_id = label_to_id[class_name]
+
+        for index in train_indices:
+            train_paths.append(image_paths[index])
+            train_labels.append(class_id)
+        for index in test_indices:
+            test_paths.append(image_paths[index])
+            test_labels.append(class_id)
+
+    if not train_paths or not test_paths:
+        raise ValueError(f"OfficeHome domain '{domain}' did not produce both train and test samples.")
+
+    return {
+        "train": _build_image_dataset(train_paths, train_labels, label_names),
+        "test": _build_image_dataset(test_paths, test_labels, label_names),
+    }
+
+
+def load_officehome_splits(
+    dataset_root: str,
+    source_domain: str,
+    target_domain: str,
+    limits: Dict[str, Optional[int]],
+    train_split_ratio: float,
+    seed: int,
+) -> Dict[str, Dataset]:
+    root_path = Path(dataset_root)
+    if not root_path.is_dir():
+        raise FileNotFoundError(f"OfficeHome dataset root not found: {root_path}")
+
+    label_names = _list_officehome_class_names(root_path, OFFICEHOME_DOMAINS)
+    source_splits = _collect_officehome_domain_dataset(
+        dataset_root=root_path,
+        domain=source_domain,
+        label_names=label_names,
+        train_split_ratio=train_split_ratio,
+        seed=seed,
+    )
+    target_splits = _collect_officehome_domain_dataset(
+        dataset_root=root_path,
+        domain=target_domain,
+        label_names=label_names,
+        train_split_ratio=train_split_ratio,
+        seed=seed,
+    )
+
+    source_train = maybe_limit_dataset(source_splits["train"], limits["source_train"])
+    target_train = maybe_limit_dataset(target_splits["train"], limits["target_train"])
+    target_test = maybe_limit_dataset(target_splits["test"], limits["target_test"])
+    source_test = maybe_limit_dataset(source_splits["test"], limits["source_test"])
+
+    return {
+        "source_train": source_train,
+        "target_train": target_train,
+        "target_test": target_test,
+        "source_test": source_test,
+    }
+
+
+def load_dataset_splits(
+    dataset_name: str,
+    dataset_root: Optional[str],
+    cache_dir: Optional[str],
+    source_domain: str,
+    target_domain: str,
+    limits: Dict[str, Optional[int]],
+    train_split_ratio: float,
+    seed: int,
+) -> Dict[str, Dataset]:
+    validate_domain_names(dataset_name, source_domain, target_domain)
+    if is_officehome_dataset(dataset_name):
+        if dataset_root is None:
+            raise ValueError("dataset_root is required for OfficeHome.")
+        return load_officehome_splits(
+            dataset_root=dataset_root,
+            source_domain=source_domain,
+            target_domain=target_domain,
+            limits=limits,
+            train_split_ratio=train_split_ratio,
+            seed=seed,
+        )
+    return load_domainnet_splits(
+        dataset_name=dataset_name,
+        cache_dir=cache_dir,
+        source_domain=source_domain,
+        target_domain=target_domain,
+        limits=limits,
+    )

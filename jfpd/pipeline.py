@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Dict
 
 from .config import JFPDConfig
-from .data import DynamicPrototypeSource, build_loader, get_class_names, load_domainnet_splits
+from .data import DynamicPrototypeSource, build_loader, get_class_names, load_dataset_splits
 from .model import JFPDNet
 from .training import adapt_one_epoch, build_optimizer, evaluate, train_source_epoch
 from .utils import print_stats, save_checkpoint, save_json, select_device, set_seed
@@ -29,12 +29,15 @@ class JFPDTrainer:
             "target_test": cfg.max_target_test_samples,
             "source_test": cfg.max_source_test_samples,
         }
-        splits = load_domainnet_splits(
+        splits = load_dataset_splits(
             dataset_name=cfg.dataset_name,
+            dataset_root=cfg.dataset_root,
             cache_dir=cfg.cache_dir,
             source_domain=cfg.source_domain,
             target_domain=cfg.target_domain,
             limits=limits,
+            train_split_ratio=cfg.train_split_ratio,
+            seed=cfg.seed,
         )
 
         label_names = get_class_names(splits["source_train"], "label")
