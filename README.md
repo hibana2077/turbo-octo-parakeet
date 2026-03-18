@@ -6,7 +6,7 @@ The entrypoint is [train_jfpd.py](/home/timelab/Desktop/codes/turbo-octo-parakee
 
 1. Source-domain supervised pretraining with cross-entropy.
 2. Dynamic source prototype estimation during adaptation, resampling source examples each iteration.
-3. Target-domain adaptation with the JFPD loss.
+3. Target-domain adaptation with source-only prototype alignment using `jfpd`, `fgpd`, or `pgfd`.
 4. Evaluation on the target test split.
 
 DomainNet example:
@@ -49,3 +49,5 @@ Notes:
 - DomainNet uses the Hugging Face `train` / `test` splits from `wltjr1007/DomainNet`.
 - OfficeHome is loaded from `--dataset-root` and split deterministically per class within each domain using `--train-split-ratio`.
 - Version B resamples `K` source examples per class on every adaptation iteration. The default is `--proto-samples-per-class 32`.
+- Prototype lookup during adaptation uses `argmax` pseudo-labels to select the matching source prototypes.
+- `--loss-mode jfpd` is the full method, `--loss-mode fgpd` keeps only the prediction-space term, and `--loss-mode pgfd` keeps only the feature-space term.

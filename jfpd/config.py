@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional
 
+from .losses import LossMode
+
 
 DOMAINNET_DOMAINS = ("clipart", "infograph", "painting", "quickdraw", "real", "sketch")
 OFFICEHOME_DOMAINS = ("Art", "Clipart", "Product", "Real World")
@@ -27,9 +29,9 @@ class JFPDConfig:
     adapt_lr: float = 5e-5
     weight_decay: float = 1e-4
     alpha: float = 0.5
+    loss_mode: LossMode = "jfpd"
     proto_samples_per_class: int = 32
     proto_forward_batch_size: int = 256
-    proto_ema_decay: float = 0.9
     seed: int = 42
     device: Optional[str] = None
     output_dir: str = "outputs/jfpd"

@@ -5,7 +5,7 @@ from typing import Dict
 from .config import JFPDConfig
 from .data import DynamicPrototypeSource, build_loader, get_class_names, load_dataset_splits
 from .model import JFPDNet
-from .training import EMAPrototypeBank, adapt_one_epoch, build_optimizer, evaluate, train_source_epoch
+from .training import adapt_one_epoch, build_optimizer, evaluate, train_source_epoch
 from .utils import print_stats, save_checkpoint, save_json, select_device, set_seed
 
 
@@ -124,9 +124,8 @@ class JFPDTrainer:
         save_json(
             self.output_dir / "prototype_source.json",
             {
-                "mode": "dynamic_ema",
+                "mode": "dynamic_source_only",
                 "samples_per_class": cfg.proto_samples_per_class,
-                "ema_decay": cfg.proto_ema_decay,
                 "valid_mask": prototype_source.valid_mask.tolist(),
                 "missing_classes": missing_classes,
                 "label_names": label_names,
@@ -135,12 +134,6 @@ class JFPDTrainer:
 
         adapt_optimizer = build_optimizer(model, lr=cfg.adapt_lr, weight_decay=cfg.weight_decay)
         best_target_acc = -1.0
-        prototype_bank = EMAPrototypeBank.create(
-            num_classes=num_classes,
-            feat_dim=model.classifier.in_features,
-            decay=cfg.proto_ema_decay,
-            device=self.device,
-        )
 
         for epoch in range(1, cfg.adapt_epochs + 1):
             adapt_stats = adapt_one_epoch(
@@ -151,9 +144,9 @@ class JFPDTrainer:
                 optimizer=adapt_optimizer,
                 device=self.device,
                 alpha=cfg.alpha,
+                loss_mode=cfg.loss_mode,
                 proto_samples_per_class=cfg.proto_samples_per_class,
                 proto_forward_batch_size=cfg.proto_forward_batch_size,
-                prototype_bank=prototype_bank,
                 epoch=epoch,
             )
             print_stats(f"adapt_epoch_{epoch}", adapt_stats)

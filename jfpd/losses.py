@@ -1,7 +1,10 @@
-from typing import Dict, Tuple
+from typing import Dict, Literal, Tuple
 
 import torch
 import torch.nn.functional as F
+
+
+LossMode = Literal["jfpd", "fgpd", "pgfd"]
 
 
 def cosine_distance(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
@@ -42,7 +45,11 @@ def jfpd_loss(
     zs: torch.Tensor,
     ps: torch.Tensor,
     alpha: float,
+    mode: LossMode = "jfpd",
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError(f"alpha must be in [0, 1], got {alpha}.")
+
     d_feat = normalized_feature_divergence(ft, zs)
     d_pred = normalized_prediction_divergence(pt, ps)
     hs = entropy_from_prob(ps)
@@ -50,7 +57,15 @@ def jfpd_loss(
 
     psi = 1.0 / (1.0 + hs + ht)
     phi = 1.0 / (1.0 + d_feat)
-    loss = alpha * psi * d_feat + (1.0 - alpha) * phi * d_pred
+
+    if mode == "jfpd":
+        loss = alpha * psi * d_feat + (1.0 - alpha) * phi * d_pred
+    elif mode == "pgfd":
+        loss = psi * d_feat
+    elif mode == "fgpd":
+        loss = phi * d_pred
+    else:
+        raise ValueError(f"Unsupported loss mode '{mode}'. Expected one of: jfpd, fgpd, pgfd.")
 
     stats = {
         "d_feat": d_feat.mean().item(),

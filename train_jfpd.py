@@ -24,9 +24,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--adapt-lr", type=float, default=5e-5)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--alpha", type=float, default=0.5)
+    parser.add_argument("--loss-mode", choices=("jfpd", "fgpd", "pgfd"), default="jfpd")
     parser.add_argument("--proto-samples-per-class", type=int, default=32)
     parser.add_argument("--proto-forward-batch-size", type=int, default=256)
-    parser.add_argument("--proto-ema-decay", type=float, default=0.9)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None)
     parser.add_argument("--output-dir", default="outputs/jfpd")
@@ -54,8 +54,8 @@ def validate_args(args: argparse.Namespace) -> None:
     if is_officehome_dataset(args.dataset_name) and args.dataset_root is None:
         raise ValueError("--dataset-root is required when --dataset-name is OfficeHome.")
 
-    if not (0.0 <= args.proto_ema_decay < 1.0):
-        raise ValueError("--proto-ema-decay must be in the range [0, 1).")
+    if not (0.0 <= args.alpha <= 1.0):
+        raise ValueError("--alpha must be in the range [0, 1].")
 
     if args.class_limit is not None and args.class_limit <= 0:
         raise ValueError("--class-limit must be a positive integer.")
@@ -81,9 +81,9 @@ def args_to_config(args: argparse.Namespace):
         adapt_lr=args.adapt_lr,
         weight_decay=args.weight_decay,
         alpha=args.alpha,
+        loss_mode=args.loss_mode,
         proto_samples_per_class=args.proto_samples_per_class,
         proto_forward_batch_size=args.proto_forward_batch_size,
-        proto_ema_decay=args.proto_ema_decay,
         seed=args.seed,
         device=args.device,
         output_dir=args.output_dir,
@@ -97,9 +97,9 @@ def args_to_config(args: argparse.Namespace):
 
 
 def main() -> None:
+    args = parse_args()
     from jfpd.pipeline import run_jfpd_training
 
-    args = parse_args()
     config = args_to_config(args)
     run_jfpd_training(config)
 

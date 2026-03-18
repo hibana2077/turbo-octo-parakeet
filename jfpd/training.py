@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import torch
@@ -7,51 +6,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .data import DynamicPrototypeSource
-from .losses import jfpd_loss
+from .losses import LossMode, jfpd_loss
 from .types import EpochStats
 from .utils import print_stats
-
-
-@dataclass
-class EMAPrototypeBank:
-    feat_proto: torch.Tensor
-    prob_proto: torch.Tensor
-    valid_mask: torch.Tensor
-    decay: float
-
-    @classmethod
-    def create(
-        cls,
-        num_classes: int,
-        feat_dim: int,
-        decay: float,
-        device: torch.device,
-    ) -> "EMAPrototypeBank":
-        return cls(
-            feat_proto=torch.zeros(num_classes, feat_dim, device=device),
-            prob_proto=torch.zeros(num_classes, num_classes, device=device),
-            valid_mask=torch.zeros(num_classes, dtype=torch.bool, device=device),
-            decay=decay,
-        )
-
-    def update(
-        self,
-        feat_proto: torch.Tensor,
-        prob_proto: torch.Tensor,
-        valid_mask: torch.Tensor,
-    ) -> None:
-        if valid_mask.any():
-            fresh_mask = valid_mask & ~self.valid_mask
-            if fresh_mask.any():
-                self.feat_proto[fresh_mask] = feat_proto[fresh_mask]
-                self.prob_proto[fresh_mask] = prob_proto[fresh_mask]
-
-            ema_mask = valid_mask & self.valid_mask
-            if ema_mask.any():
-                self.feat_proto[ema_mask] = self.decay * self.feat_proto[ema_mask] + (1.0 - self.decay) * feat_proto[ema_mask]
-                self.prob_proto[ema_mask] = self.decay * self.prob_proto[ema_mask] + (1.0 - self.decay) * prob_proto[ema_mask]
-
-        self.valid_mask |= valid_mask
 
 
 def build_optimizer(model: nn.Module, lr: float, weight_decay: float) -> torch.optim.Optimizer:
@@ -165,9 +122,9 @@ def adapt_one_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     alpha: float,
+    loss_mode: LossMode,
     proto_samples_per_class: int,
     proto_forward_batch_size: int,
-    prototype_bank: Optional[EMAPrototypeBank] = None,
     epoch: Optional[int] = None,
     log_every_batches: int = 5,
 ) -> EpochStats:
@@ -192,11 +149,6 @@ def adapt_one_epoch(
             forward_batch_size=proto_forward_batch_size,
             device=device,
         )
-        if prototype_bank is not None:
-            prototype_bank.update(source_feat_proto, source_prob_proto, valid_proto_mask)
-            source_feat_proto = prototype_bank.feat_proto
-            source_prob_proto = prototype_bank.prob_proto
-            valid_proto_mask = prototype_bank.valid_mask
         model.train()
 
         x_t = batch["pixel_values"].to(device, non_blocking=True)
@@ -211,10 +163,10 @@ def adapt_one_epoch(
         ft = ft[keep_mask]
         pt = pt[keep_mask]
         pseudo = pseudo[keep_mask]
-        zs = source_feat_proto[pseudo] # TODO: switch to softmax instead of argmax
-        ps = source_prob_proto[pseudo] # TODO: switch to softmax instead of argmax
+        zs = source_feat_proto[pseudo]
+        ps = source_prob_proto[pseudo]
 
-        loss, stats = jfpd_loss(ft, pt, zs, ps, alpha=alpha)
+        loss, stats = jfpd_loss(ft, pt, zs, ps, alpha=alpha, mode=loss_mode)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()

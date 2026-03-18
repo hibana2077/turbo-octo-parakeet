@@ -27,6 +27,21 @@ def run_exact_numeric_check() -> None:
     print("exact numeric check passed")
 
 
+def run_loss_mode_check() -> None:
+    ft = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
+    zs = torch.tensor([[0.6, 0.8]], dtype=torch.float64)
+    pt = torch.tensor([[0.7, 0.2, 0.1]], dtype=torch.float64)
+    ps = torch.tensor([[0.8, 0.1, 0.1]], dtype=torch.float64)
+
+    fgpd_loss, fgpd_stat = jfpd_loss(ft, pt, zs, ps, alpha=0.5, mode="fgpd")
+    pgfd_loss, pgfd_stat = jfpd_loss(ft, pt, zs, ps, alpha=0.5, mode="pgfd")
+
+    assert_close("fgpd loss", fgpd_loss.item(), fgpd_stat["phi"] * fgpd_stat["d_pred"])
+    assert_close("pgfd loss", pgfd_loss.item(), pgfd_stat["psi"] * pgfd_stat["d_feat"])
+
+    print("loss mode check passed")
+
+
 def run_perfect_match_check() -> None:
     ft = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
     zs = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
@@ -120,6 +135,7 @@ def run_prototype_indexing_check() -> None:
 
 def main() -> None:
     run_exact_numeric_check()
+    run_loss_mode_check()
     run_perfect_match_check()
     run_entropy_trust_check()
     run_feature_trust_check()
