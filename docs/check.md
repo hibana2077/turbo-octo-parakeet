@@ -1,199 +1,196 @@
-Yes — the best way is to **unit-test the JFPD math before training**.
+這組 log 很不正常，**比較像 pipeline / implementation bug，不像單純沒 tune 好**。
 
-For this paper, the key things to verify independently are:
+你的現象是：
 
-1. `d_feat = d / (1 + d)`
-2. `d_pred = D / (1 + D)`
-3. `ψ = 1 / (1 + H(ps) + H(pt))`
-4. `ϕ = 1 / (1 + d_feat)`
-5. `L_JFPD = α ψ d_feat + (1-α) ϕ d_pred`
-6. pseudo-label retrieval uses `argmax(pt)` and then selects the matching source prototypes `(z_s^ŷ, p_s^ŷ)` for that class. The paper also states the default implementation uses cosine distance for feature divergence and JS divergence for prediction divergence.    
+* source pretrain 幾乎滿分：`accuracy=0.9993`
+* adaptation loss 很快掉到接近 0：`0.0939 -> 0.0002`
+* 但 target accuracy 不只沒上升，還掉到 `8.85% -> 4.17% -> 2.08% -> 4.69%`
 
-## 1) One exact hand-check example
+這代表模型很可能正在**非常成功地優化一個錯的目標**，而不是在做有效的 domain adaptation。這和你上傳的檢查筆記裡的判斷一致：這種「loss 很漂亮、accuracy 很差」最常見是 prototype 來源、feature/prediction 空間、divergence/trust 公式，或 evaluation label mapping 出錯。
 
-Use this exact test case:
+我會這樣判斷優先順序。
 
-* `ft = [1.0, 0.0]`
-* `zs = [0.6, 0.8]`
-* `pt = [0.7, 0.2, 0.1]`
-* `ps = [0.8, 0.1, 0.1]`
-* `alpha = 0.5`
+## 最可能的 bug 1：adaptation 時 prototype 不是純 source prototype
 
-Using **cosine distance** and **JS divergence**, you should get:
+JFPD 的 paper 很明確：
+target sample 先用 pseudo-label 決定類別，然後**只去取對應的 source prototypes** `(z^s_{ŷ_t}, p^s_{ŷ_t})`。paper 的 Algorithm 1 也是這個流程。
 
-* cosine similarity = `0.6`
-* cosine distance = `1 - 0.6 = 0.4`
-* `d_feat = 0.4 / 1.4 = 0.2857142857`
-* `ϕ = 1 / (1 + 0.2857142857) = 0.7777777778`
+也就是說，adaptation 應該是：
 
-Using natural log:
+1. target forward
+2. 算 pseudo-label
+3. 用 pseudo-label 去選 **source** feature prototype / **source** prediction prototype
+4. 算 discrepancy
 
-* `H(ps) = 0.6390318597`
-* `H(pt) = 0.8018185525`
-* `ψ = 1 / (1 + H(ps) + H(pt)) = 0.4096932753`
+不是：
 
-For prediction divergence:
+* 用 target batch 自己做 prototype
+* source / target 混在一起做 prototype
+* 建 target pseudo-prototype bank 再去對齊
 
-* `JS(pt, ps) = 0.0101628553`
-* `d_pred = 0.0101628553 / (1 + 0.0101628553) = 0.0100606107`
+你的 log 非常像這種錯：如果 target 跟 target 自己比，或 target prototype 被混進去，`d_feat` 和 `d_pred` 會很快接近 0，但分類能力不會真的變好。這點也在你上傳的 implementation guide 裡被特別強調。 
 
-Final loss:
-
-* `L = 0.5 * ψ * d_feat + 0.5 * ϕ * d_pred`
-* `L = 0.0624400705`
-
-So if your code is correct, it should reproduce those numbers up to small floating-point tolerance. These steps directly match the paper’s definitions of normalized feature divergence, normalized prediction divergence, uncertainty-aware trust, semantic-alignment trust, and the final JFPD loss.   
+**你現在最該先印的 debug log：**
 
 ```python
-import torch
-
-# assume you already defined:
-# cosine_distance
-# normalized_feature_divergence
-# js_divergence
-# normalized_prediction_divergence
-# entropy_from_prob
-# jfpd_loss
-
-ft = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
-zs = torch.tensor([[0.6, 0.8]], dtype=torch.float64)
-
-pt = torch.tensor([[0.7, 0.2, 0.1]], dtype=torch.float64)
-ps = torch.tensor([[0.8, 0.1, 0.1]], dtype=torch.float64)
-
-loss, stat = jfpd_loss(ft, pt, zs, ps, alpha=0.5)
-
-print("d_feat =", stat["d_feat"])
-print("d_pred =", stat["d_pred"])
-print("psi    =", stat["psi"])
-print("phi    =", stat["phi"])
-print("loss   =", loss.item())
-
-assert abs(stat["d_feat"] - 0.2857142857) < 1e-6
-assert abs(stat["d_pred"] - 0.0100606107) < 1e-6
-assert abs(stat["psi"]    - 0.4096932753) < 1e-6
-assert abs(stat["phi"]    - 0.7777777778) < 1e-6
-assert abs(loss.item()    - 0.0624400705) < 1e-6
-
-print("value check passed")
+print("prototype_domain", prototype_domain)  # 應該永遠是 source
+print("target_used_in_proto", target_used_in_proto)  # 應該永遠 False
+print("proto_labels_used", proto_labels_used[:10])   # 應該對應 pseudo-label
+print("source_proto_count_per_class", counts)
 ```
 
----
+## 最可能的 bug 2：feature prototype 和 prediction prototype 用錯空間
 
-## 2) Three sanity checks that should always hold
+paper 的定義是：
 
-These are even more useful than a single scalar test.
+* feature prototype = `f(x)` 的平均
+* prediction prototype = `g(f(x))` 的平均，也就是 **softmax probability** 的平均，不是 logits。 
 
-### Check A: perfect match gives zero loss
+如果你用 timm/ViT 時不小心：
 
-If `ft == zs` and `pt == ps`, then both divergences are zero, so the final JFPD loss must be zero. That follows immediately from the paper’s equations.  
+* 把 logits 當 feature
+* `forward_features()` 之後沒做對應的 pooling / pre_logits
+* feature prototype 和 prediction prototype 其實都來自同一個 tensor
+
+那 JFPD 會直接失真。loss 可以很好看，但任務早就不是 paper 那個 objective 了。這也正是你上傳的 check.md 裡列的高風險錯誤。
+
+**立刻檢查：**
 
 ```python
-ft = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
-zs = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
-pt = torch.tensor([[0.8, 0.1, 0.1]], dtype=torch.float64)
-ps = torch.tensor([[0.8, 0.1, 0.1]], dtype=torch.float64)
-
-loss, stat = jfpd_loss(ft, pt, zs, ps, alpha=0.5)
-assert abs(stat["d_feat"]) < 1e-12
-assert abs(stat["d_pred"]) < 1e-12
-assert abs(loss.item()) < 1e-12
+print(z_s.shape)   # 應該是 [num_classes, feature_dim]
+print(p_s.shape)   # 應該是 [num_classes, num_classes]
+print(feature_dim, num_classes)  # 兩者不應相等（通常）
+print(p_t.sum(dim=-1)[:5])       # 應該接近 1
+print(p_s.sum(dim=-1)[:5])       # 應該接近 1
 ```
 
-### Check B: higher entropy should reduce `ψ`
+如果 `p_s` 不是機率分布，`d_pred` 幾乎一定會錯。
 
-Because `ψ = 1 / (1 + H(ps) + H(pt))`, more uncertain predictions must give smaller trust.  
+## 最可能的 bug 3：divergence / trust weight 公式實作錯
+
+paper 明確寫的是：
+
+* `d_feat = d / (1 + d)`
+* `d_pred = D / (1 + D)`
+* `psi = 1 / (1 + H(p_t) + H(p^s_{ŷ_t}))`
+* `phi = 1 / (1 + d_feat(...))`  
+
+常見錯法是：
+
+* 用 `cosine_similarity` 當 distance
+* 忘了做 normalize：`d/(1+d)`
+* `d_pred` 拿 KL / CE 亂代，甚至直接對 logits 算
+* `phi` 寫成 `1 + d_feat`
+* `psi` 只用 target entropy，沒跟 source prediction prototype 對應
+
+你的 log 裡：
+
+* `d_feat` 很快到 `0.0012`
+* `d_pred` 幾乎 `0.0001`
+* `phi` 卻幾乎 `0.999`
+
+這種速度太可疑了。正常情況下，target accuracy 還在 2%～5% 時，不太可能 feature/prediction discrepancy 已經幾乎完美對齊。這也和你的筆記中的判斷一致。
+
+## 也很值得查：evaluation label mapping 或單一類別崩塌
+
+你這個 accuracy 水平很像：
+
+* 幾乎全部預測成某一類
+* 或 source / target / test 的 `class_to_idx` 不一致
+
+你的檢查筆記也提到這點。
+
+**立刻印：**
 
 ```python
-conf = torch.tensor([[0.98, 0.01, 0.01]], dtype=torch.float64)
-unif = torch.tensor([[1/3, 1/3, 1/3]], dtype=torch.float64)
-
-psi_conf = 1.0 / (1.0 + entropy_from_prob(conf) + entropy_from_prob(conf))
-psi_unif = 1.0 / (1.0 + entropy_from_prob(unif) + entropy_from_prob(unif))
-
-assert psi_conf.item() > psi_unif.item()
+# target test
+print("pred hist:", torch.bincount(preds, minlength=num_classes))
+print("label hist:", torch.bincount(labels, minlength=num_classes))
+print("mean max prob:", probs.max(dim=1).values.mean().item())
+print("class_to_idx source:", source_dataset.class_to_idx)
+print("class_to_idx target_train:", target_train_dataset.class_to_idx)
+print("class_to_idx target_test:", target_test_dataset.class_to_idx)
 ```
 
-### Check C: larger feature mismatch should reduce `ϕ`
+如果你看到：
 
-Because `ϕ = 1 / (1 + d_feat)`, more feature discrepancy means smaller semantic trust. 
+* `pred hist` 幾乎集中在單一類 => model collapse
+* confusion matrix 像 permutation => label mapping bug
+
+## 設定本身也偏離 paper，但這不是 4% 的主因
+
+你的 command 用的是 `vit_tiny_patch16_224...`，而 paper 在 Office-Home 用的是 ImageNet-pretrained ResNet-34 / ResNet-50 / ViT-B/32 / ViT-B/16；source pretraining 100 epochs，adapt 50 epochs，batch size 128，prototype 每類 32 個 source samples。 
+
+所以你現在的設定確實和 paper 不一致。這可能讓結果變差，但**不太會讓它壞到 2%～8% 這種程度**。這種程度還是更像程式錯。
+
+## 我建議你先做的最小 debug 順序
+
+先不要大改整個系統，先做這四件：
+
+1. **把 prototype 固定成 source-only**
+
+   * 暫時不要 dynamic target-related 東西
+   * 先確認 target 完全不參與 prototype 建構
+
+2. **確認兩種 prototype 的空間**
+
+   * `z_s_c = mean(feature)`
+   * `p_s_c = mean(softmax(logits))`
+
+3. **把 divergence / trust 單元測試化**
+
+   * 人工餵兩個相同向量，distance 應接近 0
+   * 人工餵兩個不同 one-hot 分布，JS divergence 應大於 0
+   * 檢查 `phi = 1/(1+d_feat)`、`psi = 1/(1+H(pt)+H(ps_proto))`
+
+4. **檢查 evaluation mapping**
+
+   * `class_to_idx`
+   * prediction histogram
+   * confusion matrix
+
+## 一個很實用的 smoke test
+
+在正式 adapt 前，先做一個極小測試：
+
+* 抽 8 個 target samples
+* 抽每類 2 個 source samples 建 prototype
+* 手動印出每個 sample 的：
+
+  * pseudo-label
+  * selected source class
+  * `d_feat`
+  * `d_pred`
+  * `psi`
+  * `phi`
+  * final loss
+
+像這樣：
 
 ```python
-ft1 = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
-zs1 = torch.tensor([[1.0, 0.0]], dtype=torch.float64)   # identical
-
-ft2 = torch.tensor([[1.0, 0.0]], dtype=torch.float64)
-zs2 = torch.tensor([[0.0, 1.0]], dtype=torch.float64)   # orthogonal
-
-d1 = normalized_feature_divergence(ft1, zs1)
-d2 = normalized_feature_divergence(ft2, zs2)
-
-phi1 = 1.0 / (1.0 + d1)
-phi2 = 1.0 / (1.0 + d2)
-
-assert d1.item() < d2.item()
-assert phi1.item() > phi2.item()
+for i in range(8):
+    print({
+        "pseudo": yhat[i].item(),
+        "d_feat": d_feat[i].item(),
+        "d_pred": d_pred[i].item(),
+        "psi": psi[i].item(),
+        "phi": phi[i].item(),
+        "loss": loss_i[i].item(),
+    })
 ```
 
----
+如果你看到一開始就幾乎全部 `d_feat≈0`、`d_pred≈0`，那幾乎可以直接確定 implementation 有問題。
 
-## 3) Prototype indexing check
+## 我的結論
 
-A very common bug is not the math, but selecting the **wrong prototype** after pseudo-labeling. During adaptation, the paper says you assign `ŷ_t = argmax(pt)` and retrieve the corresponding source feature/prediction prototypes for that class. 
+單看這份 log，我的排序是：
 
-So test that explicitly:
+1. **prototype 來源錯**
+2. **feature / prediction prototype 空間用錯**
+3. **divergence / trust 公式錯**
+4. **evaluation label mapping 或 collapse**
+5. 設定偏離 paper
 
-```python
-source_feat_proto = torch.tensor([
-    [1.0, 0.0],   # class 0
-    [0.0, 1.0],   # class 1
-    [1.0, 1.0],   # class 2
-], dtype=torch.float64)
+其中第 1 點最可疑，因為 paper 明確要求 adaptation 時 target sample 只去對齊 **source prototypes**，而不是 target prototypes。 
 
-source_prob_proto = torch.tensor([
-    [0.9, 0.05, 0.05],  # class 0
-    [0.1, 0.8, 0.1],    # class 1
-    [0.1, 0.2, 0.7],    # class 2
-], dtype=torch.float64)
-
-pt = torch.tensor([
-    [0.05, 0.90, 0.05],  # pseudo-label 1
-    [0.20, 0.20, 0.60],  # pseudo-label 2
-], dtype=torch.float64)
-
-pseudo = pt.argmax(dim=-1)
-zs = source_feat_proto[pseudo]
-ps = source_prob_proto[pseudo]
-
-assert pseudo.tolist() == [1, 2]
-assert torch.allclose(zs, torch.tensor([[0.0, 1.0], [1.0, 1.0]], dtype=torch.float64))
-assert torch.allclose(ps, torch.tensor([[0.1, 0.8, 0.1], [0.1, 0.2, 0.7]], dtype=torch.float64))
-```
-
-If this fails, your pipeline is wrong even if the formulas are correct.
-
----
-
-## 4) What usually goes wrong in practice
-
-The most common implementation mistakes are:
-
-* using **logits** instead of **probabilities** in entropy / JS divergence
-* averaging source **logits** rather than averaging source **softmax probabilities** for `p_s^c`
-* computing `ϕ` from raw cosine distance instead of the paper’s normalized `d_feat`
-* mixing up `alpha` branches, since the paper uses `α ψ d_feat + (1-α) ϕ d_pred`
-* prototype indexing off by one or misaligned class ids after dataset filtering. The source prediction prototype is defined as the average of `g(f(x_s))`, and the loss uses source prototypes matched by target label or pseudo-label.  
-
----
-
-## 5) The safest debugging order
-
-Do it in this order:
-
-1. verify the single-sample exact numeric test above
-2. verify the three invariants
-3. verify pseudo-label → prototype lookup
-4. run one tiny batch and print all intermediate tensors
-5. only then start adaptation training
-
-If you want, paste your current `jfpd_loss()` and prototype code, and I’ll check it line by line against the paper’s equations.
+把 `compute_prototypes()`、`compute_jfpd_loss()`、還有 ViT 的 `forward_features / head` 那段貼出來，我可以直接幫你逐段抓。

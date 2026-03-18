@@ -36,6 +36,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-source-test-samples", type=int, default=None)
     parser.add_argument("--class-limit", type=int, default=None)
     parser.add_argument("--eval-source", action="store_true")
+    parser.add_argument("--debug-bug2", action="store_true")
+    parser.add_argument("--debug-bug4", action="store_true")
+    parser.add_argument("--debug-collapse", action="store_true")
+    parser.add_argument("--pseudo-confidence-threshold", type=float, default=0.95)
+    parser.add_argument("--source-anchor-weight", type=float, default=0.1)
+    parser.add_argument("--max-pseudo-per-class", type=int, default=8)
+    parser.set_defaults(freeze_classifier_during_adapt=True)
+    parser.add_argument(
+        "--freeze-classifier-during-adapt",
+        dest="freeze_classifier_during_adapt",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--no-freeze-classifier-during-adapt",
+        dest="freeze_classifier_during_adapt",
+        action="store_false",
+    )
     args = parser.parse_args()
     validate_args(args)
     return args
@@ -59,6 +76,15 @@ def validate_args(args: argparse.Namespace) -> None:
 
     if args.class_limit is not None and args.class_limit <= 0:
         raise ValueError("--class-limit must be a positive integer.")
+
+    if not (0.0 <= args.pseudo_confidence_threshold <= 1.0):
+        raise ValueError("--pseudo-confidence-threshold must be in the range [0, 1].")
+
+    if args.source_anchor_weight < 0.0:
+        raise ValueError("--source-anchor-weight must be non-negative.")
+
+    if args.max_pseudo_per_class is not None and args.max_pseudo_per_class <= 0:
+        raise ValueError("--max-pseudo-per-class must be a positive integer.")
 
 
 def args_to_config(args: argparse.Namespace):
@@ -93,6 +119,13 @@ def args_to_config(args: argparse.Namespace):
         max_source_test_samples=args.max_source_test_samples,
         class_limit=args.class_limit,
         eval_source=args.eval_source,
+        debug_bug2=args.debug_bug2,
+        debug_bug4=args.debug_bug4,
+        debug_collapse=args.debug_collapse,
+        pseudo_confidence_threshold=args.pseudo_confidence_threshold,
+        freeze_classifier_during_adapt=args.freeze_classifier_during_adapt,
+        source_anchor_weight=args.source_anchor_weight,
+        max_pseudo_per_class=args.max_pseudo_per_class,
     )
 
 

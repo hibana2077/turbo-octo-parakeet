@@ -2,6 +2,7 @@
 
 import torch
 
+from jfpd.losses import normalized_prediction_divergence
 from train_jfpd import entropy_from_prob, jfpd_loss, normalized_feature_divergence
 
 
@@ -91,6 +92,22 @@ def run_feature_trust_check() -> None:
     print("feature trust check passed")
 
 
+def run_prediction_divergence_check() -> None:
+    same = torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float64)
+    other = torch.tensor([[0.0, 1.0, 0.0]], dtype=torch.float64)
+
+    d_same = normalized_prediction_divergence(same, same)
+    d_diff = normalized_prediction_divergence(same, other)
+    d_diff_rev = normalized_prediction_divergence(other, same)
+
+    assert_close("prediction divergence identical", d_same.item(), 0.0, tol=1e-12)
+    if not (d_diff.item() > 0.0):
+        raise AssertionError(f"prediction divergence positivity failed: d_diff={d_diff.item():.10f}")
+    assert_close("prediction divergence symmetry", d_diff.item(), d_diff_rev.item(), tol=1e-12)
+
+    print("prediction divergence check passed")
+
+
 def run_prototype_indexing_check() -> None:
     source_feat_proto = torch.tensor(
         [
@@ -139,6 +156,7 @@ def main() -> None:
     run_perfect_match_check()
     run_entropy_trust_check()
     run_feature_trust_check()
+    run_prediction_divergence_check()
     run_prototype_indexing_check()
     print("all JFPD checks passed")
 
