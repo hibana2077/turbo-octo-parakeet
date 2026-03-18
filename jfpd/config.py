@@ -41,12 +41,8 @@ class JFPDConfig:
     max_source_test_samples: Optional[int] = None
     class_limit: Optional[int] = None
     eval_source: bool = False
-    debug_bug2: bool = False
-    debug_bug4: bool = False
-    debug_collapse: bool = False
-    pseudo_confidence_threshold: float = 0.95
-    freeze_classifier_during_adapt: bool = True
     source_anchor_weight: float = 0.1
+    source_anchor_come_from: str = "target"
     max_pseudo_per_class: Optional[int] = 8
 
 

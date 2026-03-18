@@ -11,11 +11,6 @@ from .types import EpochStats
 from .utils import print_stats
 
 
-def _format_debug_vector(values: torch.Tensor, limit: int = 5) -> str:
-    clipped = values.detach().cpu().tolist()[:limit]
-    return "[" + ", ".join(f"{value:.6f}" for value in clipped) + "]"
-
-
 def build_optimizer(model: nn.Module, lr: float, weight_decay: float) -> torch.optim.Optimizer:
     parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
     if not parameters:
@@ -113,47 +108,6 @@ def _top_histogram_entries(hist: torch.Tensor, label_names: Optional[list], limi
     return entries
 
 
-def _top_metric_entries(values: torch.Tensor, label_names: Optional[list], limit: int = 5) -> list:
-    if values.numel() == 0:
-        return []
-
-    metric = values.detach().cpu()
-    top_values, top_indices = torch.topk(metric, k=min(limit, metric.numel()))
-    entries = []
-    for value, class_id in zip(top_values.tolist(), top_indices.tolist()):
-        entry = {"class_id": int(class_id), "value": float(value)}
-        if label_names is not None and 0 <= class_id < len(label_names):
-            entry["label"] = label_names[class_id]
-        entries.append(entry)
-    return entries
-
-
-def _class_metric_summary(
-    values: torch.Tensor,
-    class_id: int,
-    label_names: Optional[list],
-) -> Dict[str, object]:
-    metric = values.detach().cpu()
-    if metric.numel() == 0 or not (0 <= class_id < metric.numel()):
-        return {
-            "class_id": class_id,
-            "label": label_names[class_id] if label_names is not None and 0 <= class_id < len(label_names) else None,
-            "value": None,
-            "rank_desc": None,
-        }
-
-    target_value = float(metric[class_id].item())
-    rank_desc = int((metric > metric[class_id]).sum().item()) + 1
-    summary: Dict[str, object] = {
-        "class_id": class_id,
-        "value": target_value,
-        "rank_desc": rank_desc,
-    }
-    if label_names is not None and 0 <= class_id < len(label_names):
-        summary["label"] = label_names[class_id]
-    return summary
-
-
 def _select_top_confidence_per_class(
     pseudo: torch.Tensor,
     confidence: torch.Tensor,
@@ -240,53 +194,6 @@ def evaluate_with_diagnostics(
 
 
 @torch.no_grad()
-def summarize_collapse_risk(
-    model: nn.Module,
-    prototype_source: DynamicPrototypeSource,
-    num_classes: int,
-    samples_per_class: int,
-    forward_batch_size: int,
-    device: torch.device,
-    label_names: Optional[list] = None,
-) -> Dict[str, object]:
-    classifier_bias = model.classifier.bias.detach().cpu()
-    classifier_weight_norm = model.classifier.weight.detach().norm(dim=-1).cpu()
-    source_feat_proto, source_prob_proto, valid_proto_mask = build_dynamic_source_prototypes(
-        model=model,
-        prototype_source=prototype_source,
-        num_classes=num_classes,
-        samples_per_class=samples_per_class,
-        forward_batch_size=forward_batch_size,
-        device=device,
-    )
-
-    source_feat_proto_norm = source_feat_proto.detach().norm(dim=-1).cpu()
-    source_prob_proto_peak = source_prob_proto.detach().max(dim=-1).values.cpu()
-    valid_class_ids = valid_proto_mask.detach().cpu().nonzero(as_tuple=False).view(-1)
-
-    diagnostics: Dict[str, object] = {
-        "classifier_bias": classifier_bias.tolist(),
-        "classifier_weight_norm": classifier_weight_norm.tolist(),
-        "classifier_bias_top": _top_metric_entries(classifier_bias, label_names, limit=10),
-        "classifier_weight_norm_top": _top_metric_entries(classifier_weight_norm, label_names, limit=10),
-        "class0_classifier_bias": _class_metric_summary(classifier_bias, 0, label_names),
-        "class0_classifier_weight_norm": _class_metric_summary(classifier_weight_norm, 0, label_names),
-        "valid_source_proto_classes": valid_class_ids.tolist(),
-        "source_feat_proto_norm": source_feat_proto_norm.tolist(),
-        "source_prob_proto_peak": source_prob_proto_peak.tolist(),
-        "source_feat_proto_norm_top": _top_metric_entries(source_feat_proto_norm, label_names, limit=10),
-        "source_prob_proto_peak_top": _top_metric_entries(source_prob_proto_peak, label_names, limit=10),
-        "class0_source_feat_proto_norm": _class_metric_summary(source_feat_proto_norm, 0, label_names),
-        "class0_source_prob_proto_peak": _class_metric_summary(source_prob_proto_peak, 0, label_names),
-    }
-
-    if 0 <= 0 < num_classes and bool(valid_proto_mask[0].item()):
-        diagnostics["class0_source_prob_proto_top"] = _top_metric_entries(source_prob_proto[0], label_names, limit=10)
-
-    return diagnostics
-
-
-@torch.no_grad()
 def build_dynamic_source_prototypes(
     model: nn.Module,
     prototype_source: DynamicPrototypeSource,
@@ -294,8 +201,6 @@ def build_dynamic_source_prototypes(
     samples_per_class: int,
     forward_batch_size: int,
     device: torch.device,
-    debug_bug2: bool = False,
-    debug_prefix: Optional[str] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     model.eval()
     feat_proto = torch.zeros(num_classes, model.classifier.in_features, device=device)
@@ -324,17 +229,6 @@ def build_dynamic_source_prototypes(
     feat_proto[valid_mask] = feat_proto[valid_mask] / counts[valid_mask].unsqueeze(-1)
     prob_proto[valid_mask] = prob_proto[valid_mask] / counts[valid_mask].unsqueeze(-1)
 
-    if debug_bug2:
-        prefix = debug_prefix or "bug2_debug"
-        print(f"{prefix}: source_proto_count_per_class={counts.detach().cpu().tolist()}")
-        print(
-            f"{prefix}: z_s_shape={tuple(feat_proto.shape)}, "
-            f"p_s_shape={tuple(prob_proto.shape)}, "
-            f"feature_dim={feat_proto.size(-1)}, num_classes={num_classes}"
-        )
-        if valid_mask.any():
-            print(f"{prefix}: p_s_row_sums={_format_debug_vector(prob_proto[valid_mask].sum(dim=-1))}")
-
     return feat_proto, prob_proto, valid_mask
 
 
@@ -343,6 +237,7 @@ def adapt_one_epoch(
     loader: DataLoader,
     prototype_source: DynamicPrototypeSource,
     source_loader: Optional[DataLoader],
+    source_anchor_model: nn.Module,
     num_classes: int,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
@@ -350,13 +245,10 @@ def adapt_one_epoch(
     loss_mode: LossMode,
     proto_samples_per_class: int,
     proto_forward_batch_size: int,
-    pseudo_confidence_threshold: float,
     source_anchor_weight: float,
     max_pseudo_per_class: Optional[int],
     epoch: Optional[int] = None,
     log_every_batches: int = 5,
-    debug_bug2: bool = False,
-    debug_collapse: bool = False,
     label_names: Optional[list] = None,
 ) -> Tuple[EpochStats, Dict[str, object]]:
     model.train()
@@ -370,10 +262,8 @@ def adapt_one_epoch(
     }
     used_samples = 0
     skipped_samples = 0
-    filtered_by_confidence = 0
-    filtered_by_class_cap = 0
+        filtered_by_class_cap = 0
     total_batches = len(loader)
-    bug2_logged = False
     pseudo_hist = torch.zeros(num_classes, dtype=torch.long)
     confident_pseudo_hist = torch.zeros(num_classes, dtype=torch.long)
     selected_proto_hist = torch.zeros(num_classes, dtype=torch.long)
@@ -384,18 +274,12 @@ def adapt_one_epoch(
 
     for batch_idx, batch in enumerate(loader, start=1):
         source_feat_proto, source_prob_proto, valid_proto_mask = build_dynamic_source_prototypes(
-            model=model,
+            model=source_anchor_model,
             prototype_source=prototype_source,
             num_classes=num_classes,
             samples_per_class=proto_samples_per_class,
             forward_batch_size=proto_forward_batch_size,
             device=device,
-            debug_bug2=debug_bug2 and not bug2_logged,
-            debug_prefix=(
-                f"bug2_epoch_{epoch}_batch_{batch_idx}_source_proto"
-                if epoch is not None
-                else f"bug2_batch_{batch_idx}_source_proto"
-            ),
         )
         model.train()
 
@@ -409,10 +293,6 @@ def adapt_one_epoch(
         pseudo_hist += torch.bincount(pseudo.detach().cpu(), minlength=num_classes)
 
         keep_mask = valid_proto_mask[pseudo]
-        if pseudo_confidence_threshold > 0.0:
-            confidence_mask = max_prob >= pseudo_confidence_threshold
-            filtered_by_confidence += (keep_mask & ~confidence_mask).sum().item()
-            keep_mask = keep_mask & confidence_mask
         if not keep_mask.any():
             skipped_samples += pt.size(0)
             continue
@@ -439,24 +319,6 @@ def adapt_one_epoch(
         selected_proto_hist += torch.bincount(pseudo.detach().cpu(), minlength=num_classes)
         zs = source_feat_proto[pseudo]
         ps = source_prob_proto[pseudo]
-
-        if debug_bug2 and not bug2_logged:
-            prefix = (
-                f"bug2_epoch_{epoch}_batch_{batch_idx}_target"
-                if epoch is not None
-                else f"bug2_batch_{batch_idx}_target"
-            )
-            print(f"{prefix}: f_t_shape={tuple(ft.shape)}, p_t_shape={tuple(pt.shape)}")
-            print(f"{prefix}: p_t_row_sums={_format_debug_vector(pt.sum(dim=-1))}")
-            print(f"{prefix}: p_s_row_sums={_format_debug_vector(ps.sum(dim=-1))}")
-            bug2_logged = True
-
-        if debug_collapse and batch_idx == 1:
-            prefix = f"collapse_epoch_{epoch}_batch_{batch_idx}" if epoch is not None else f"collapse_batch_{batch_idx}"
-            print(f"{prefix}: pseudo_hist_top={_top_histogram_entries(pseudo_hist, label_names, limit=10)}")
-            print(f"{prefix}: confident_pseudo_hist_top={_top_histogram_entries(confident_pseudo_hist, label_names, limit=10)}")
-            print(f"{prefix}: selected_proto_hist_top={_top_histogram_entries(selected_proto_hist, label_names, limit=10)}")
-            print(f"{prefix}: mean_max_prob={total_max_prob / max(total_target_samples, 1):.4f}")
 
         loss, stats = jfpd_loss(ft, pt, zs, ps, alpha=alpha, mode=loss_mode)
         if source_iter is not None:
@@ -525,9 +387,7 @@ def adapt_one_epoch(
         "dominant_confident_pseudo_ratio": int(confident_pseudo_hist.max().item()) / max(int(confident_pseudo_hist.sum().item()), 1),
         "dominant_selected_proto_class": int(selected_proto_hist.argmax().item()) if used_samples > 0 else None,
         "dominant_selected_proto_ratio": int(selected_proto_hist.max().item()) / max(used_samples, 1),
-        "filtered_by_confidence": filtered_by_confidence,
         "filtered_by_class_cap": filtered_by_class_cap,
-        "pseudo_confidence_threshold": pseudo_confidence_threshold,
         "source_anchor_weight": source_anchor_weight,
         "max_pseudo_per_class": max_pseudo_per_class,
     }
@@ -543,21 +403,6 @@ def adapt_one_epoch(
         dominant_selected_class = diagnostics["dominant_selected_proto_class"]
         if 0 <= dominant_selected_class < len(label_names):
             diagnostics["dominant_selected_proto_label"] = label_names[dominant_selected_class]
-
-    if debug_collapse:
-        prefix = f"collapse_epoch_{epoch}_summary" if epoch is not None else "collapse_summary"
-        print(
-            f"{prefix}: mean_max_prob={diagnostics['mean_max_prob']:.4f}, "
-            f"dominant_pseudo_class={diagnostics['dominant_pseudo_class']}, "
-            f"dominant_pseudo_ratio={diagnostics['dominant_pseudo_ratio']:.4f}, "
-            f"dominant_confident_pseudo_class={diagnostics['dominant_confident_pseudo_class']}, "
-            f"dominant_confident_pseudo_ratio={diagnostics['dominant_confident_pseudo_ratio']:.4f}, "
-            f"dominant_selected_proto_class={diagnostics['dominant_selected_proto_class']}, "
-            f"dominant_selected_proto_ratio={diagnostics['dominant_selected_proto_ratio']:.4f}"
-        )
-        print(f"{prefix}: pseudo_hist_top={diagnostics['pseudo_hist_top']}")
-        print(f"{prefix}: confident_pseudo_hist_top={diagnostics['confident_pseudo_hist_top']}")
-        print(f"{prefix}: selected_proto_hist_top={diagnostics['selected_proto_hist_top']}")
 
     stats = EpochStats(
         loss=meter["loss"] / used_samples,
