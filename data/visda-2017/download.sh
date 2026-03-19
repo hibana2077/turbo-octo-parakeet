@@ -11,5 +11,7 @@ wget https://raw.githubusercontent.com/VisionLearningGroup/taskcv-2017-public/ma
 
 rm *.tar
 
-mv train/image_list.txt train_list.txt
-mv validation/image_list.txt validation_list.txt
+echo "Done."
+
+# mv train/image_list.txt train_list.txt
+# mv validation/image_list.txt validation_list.txt
