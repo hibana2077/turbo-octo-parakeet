@@ -209,3 +209,5 @@ OfficeHomeDataset_10072016.zip
 OfficeHomeDataset/
 *.pt
 *.json
+data/office-home/images/
+data/office/images/

@@ -41,6 +41,7 @@ tensorboard
 
 # Configuration management
 pyyaml
+ml-collections
 
 # HTTP requests
 requests
