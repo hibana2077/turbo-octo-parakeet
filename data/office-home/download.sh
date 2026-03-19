@@ -26,6 +26,6 @@ mv "$OUT_DIR/OfficeHomeDataset_10072016"/ "images/"
 rm -rf "$OUT_DIR" "$ZIP_NAME"
 
 # Do a speical rename for real world
-mv "images/OfficeHomeDataset_10072016/Real World" "images/OfficeHomeDataset_10072016/Real_World"
+mv "images/Real World" "images/Real_World"
 
 echo "Done."
