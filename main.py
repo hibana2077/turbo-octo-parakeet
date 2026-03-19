@@ -37,6 +37,37 @@ import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
+LEGACY_MODEL_TYPE_TO_TIMM = {name: cfg.timm_name for name, cfg in CONFIGS.items()}
+TIMM_CONFIG_LOOKUP = {cfg.timm_name: cfg for cfg in CONFIGS.values()}
+
+
+def resolve_backbone_config(args):
+    timm_model = (args.timm_model or "").strip()
+    legacy_model_type = (args.model_type or "").strip()
+
+    if legacy_model_type:
+        if legacy_model_type not in LEGACY_MODEL_TYPE_TO_TIMM:
+            supported = ", ".join(sorted(LEGACY_MODEL_TYPE_TO_TIMM))
+            raise ValueError(f"Unsupported legacy --model_type '{legacy_model_type}'. Supported: {supported}")
+        mapped_timm_model = LEGACY_MODEL_TYPE_TO_TIMM[legacy_model_type]
+        if timm_model and timm_model != mapped_timm_model:
+            raise ValueError(
+                f"Conflicting backbone args: --model_type {legacy_model_type} maps to {mapped_timm_model}, "
+                f"but --timm_model is {timm_model}."
+            )
+        timm_model = mapped_timm_model
+        logger.warning("`--model_type` is deprecated. Please use `--timm_model %s`.", timm_model)
+
+    if not timm_model:
+        timm_model = CONFIGS["ViT-B_16"].timm_name
+
+    if args.pretrained_dir:
+        logger.warning("`--pretrained_dir` is deprecated and ignored because timm pretrained loading is used.")
+
+    args.timm_model = timm_model
+    return TIMM_CONFIG_LOOKUP.get(timm_model, CONFIGS["ViT-B_16"])
+
+
 def postprocess_activations(activations):
     output = activations
     output *= 255
@@ -128,7 +159,7 @@ def extract_checkpoint_acc(filename, prefix_saved_mode):
 
 def setup(args, prefix_saved_mode):
     # Prepare model
-    config = CONFIGS[args.model_type]
+    config = resolve_backbone_config(args)
     model = VisionTransformer(
         config,
         args.img_size,
@@ -452,16 +483,14 @@ def main():
     parser.add_argument("--test_list", default = 'data/DomainNet/sketch_test.txt', type=str, help="Path of the test data.")
     parser.add_argument("--num_classes", default=345, type=int,
                         help="Number of classes in the dataset.")
-    parser.add_argument("--model_type", choices=["ViT-B_16", "ViT-B_32", "ViT-L_16",
-                                                 "ViT-L_32", "ViT-H_14", "R50-ViT-B_16"],
-                        default="ViT-B_16",
-                        help="Which variant to use.")
     parser.add_argument("--timm_model", type=str, default="",
-                        help="Optional timm model name override (e.g. vit_base_patch16_224).")
+                        help="timm model name (e.g. vit_base_patch16_224).")
+    parser.add_argument("--model_type", type=str, default=None,
+                        help=argparse.SUPPRESS)
     parser.add_argument("--no_pretrained", default=False, action="store_true",
                         help="Disable timm pretrained weights.")
-    parser.add_argument("--pretrained_dir", type=str, default="checkpoint/imagenet21k_ViT-B_16.npz", #imagenet21k_ViT-B_16.npz  ViT-B_16.npz
-                        help="Deprecated. Kept for compatibility; timm pretrained weights are used now.")
+    parser.add_argument("--pretrained_dir", type=str, default=None,
+                        help=argparse.SUPPRESS)
     parser.add_argument("--output_dir", default="output", type=str,
                         help="The output directory where checkpoints will be written.")
 
