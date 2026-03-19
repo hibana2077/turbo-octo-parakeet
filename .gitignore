@@ -211,3 +211,5 @@ OfficeHomeDataset/
 *.json
 data/office-home/images/
 data/office/images/
+logs/
+output/

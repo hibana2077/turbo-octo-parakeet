@@ -112,6 +112,20 @@ def save_model(args, model, prefix_saved_mode, is_adv=False, ):
     torch.save(model_to_save.state_dict(), model_checkpoint)
     logger.info("Saved model checkpoint to [DIR: %s]", os.path.join(args.output_dir, args.dataset))
 
+
+def extract_checkpoint_acc(filename, prefix_saved_mode):
+    if prefix_saved_mode not in filename:
+        return None
+    suffix = filename.split(prefix_saved_mode, 1)[1]
+    if not suffix:
+        return None
+    token = suffix.split("_", 1)[0]
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
 def setup(args, prefix_saved_mode):
     # Prepare model
     config = CONFIGS[args.model_type]
@@ -134,7 +148,10 @@ def setup(args, prefix_saved_mode):
         #print('file', file)
         if(prefix_saved_mode in file and 'checkpoint' in file ):
             #print('file', file)
-            if(best_acc > float(file.split('_')[4] ) ):
+            file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
+            if file_acc is None:
+                continue
+            if(best_acc > file_acc):
                 os.remove('./output/'+args.dataset+'/'+file)
 
     if(best_model is not None):
@@ -233,8 +250,11 @@ def train(args, model,cp_mask, prefix_saved_mode):
     best_acc = 0
     for file in os.listdir('./output/'+args.dataset):
         if(prefix_saved_mode in file and 'checkpoint' in file ):
-            if(best_acc < float(file.split('_')[4] ) ):
-                best_acc = float(file.split('_')[4])
+            file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
+            if file_acc is None:
+                continue
+            if(best_acc < file_acc):
+                best_acc = file_acc
 
     if args.local_rank in [-1, 0]:
         os.makedirs(os.path.join(args.output_dir, args.dataset), exist_ok=True)
@@ -317,8 +337,9 @@ def train(args, model,cp_mask, prefix_saved_mode):
         logits_s, logits_t, loss_ad_local, loss_rec, x_s, x_t, temp_mask = model(x_s = x_s, x_t = x_t, ad_net = ad_net_local, cp_mask=cp_mask, \
             optimal_flag = args.optimal, )
         cp_mask = temp_mask
-        plt.imsave('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.jpeg',cp_mask[1:,1:].to('cpu'), cmap='rainbow' )  
-        np.savetxt('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.csv', np.array(cp_mask[1:,1:].to('cpu')) )
+        cp_mask_np = cp_mask[1:, 1:].detach().cpu().numpy()
+        plt.imsave('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.jpeg', cp_mask_np, cmap='rainbow')
+        np.savetxt('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.csv', cp_mask_np)
 
         loss_fct = CrossEntropyLoss()
         loss_clc = loss_fct(logits_s.view(-1, args.num_classes), y_s.view(-1))
@@ -338,7 +359,7 @@ def train(args, model,cp_mask, prefix_saved_mode):
             target_feat = x_t[:, 0]
             target_prob = torch.softmax(logits_t, dim=-1)
 
-            proto_feat, proto_prob, valid = build_source_prototypes(
+            proto_feat, proto_prob, valid_source = build_source_prototypes(
                 source_feat=source_feat,
                 source_prob=source_prob,
                 source_label=y_s,
@@ -346,7 +367,7 @@ def train(args, model,cp_mask, prefix_saved_mode):
             )
 
             pseudo = torch.argmax(target_prob, dim=-1)
-            valid_target = valid[pseudo]
+            valid_target = valid_source[pseudo]
             if valid_target.any():
                 zs = proto_feat[pseudo[valid_target]]
                 ps = proto_prob[pseudo[valid_target]]
@@ -398,7 +419,10 @@ def train(args, model,cp_mask, prefix_saved_mode):
                 save_model(args, ad_net_local, prefix_saved_mode +str(best_acc) +'_', is_adv=True, )
                 for file in os.listdir('./output/'+args.dataset):
                     if(prefix_saved_mode in file and 'checkpoint' in file ):
-                        if(best_acc > float(file.split('_')[4] ) ):
+                        file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
+                        if file_acc is None:
+                            continue
+                        if(best_acc > file_acc):
                             os.remove('./output/'+args.dataset+'/'+file)
 
                 if classWise_acc is not None:
