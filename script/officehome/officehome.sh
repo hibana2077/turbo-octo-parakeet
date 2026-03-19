@@ -1,0 +1,49 @@
+#!/bin/bash
+#PBS -P cp23
+#PBS -q gpuvolta
+#PBS -l ngpus=1
+#PBS -l ncpus=12
+#PBS -l mem=12GB
+#PBS -l walltime=24:00:00
+#PBS -l wd
+#PBS -l storage=scratch/cp23+gdata/yp87
+#PBS -r y
+
+module load cuda/12.6.2
+
+set -euo pipefail
+
+TAG="officehome_jfpd_sweep"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+EXP_FILE="${SCRIPT_DIR}/officehome.txt"
+
+IDX="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}"
+LINE_NO=$((IDX + 1))
+LINE="$(awk -v n="$LINE_NO" 'NF && $1 !~ /^#/ {i++; if (i==n) {print; exit}}' "$EXP_FILE")"
+
+if [[ -z "${LINE:-}" ]]; then
+  echo "No experiment config found for index ${IDX}" >&2
+  exit 1
+fi
+
+RUN_NAME="${LINE%%$'\t'*}"
+COMMAND="${LINE#*$'\t'}"
+
+if [[ "$RUN_NAME" == "$LINE" || -z "${COMMAND:-}" ]]; then
+  echo "Malformed config line at index ${IDX}: ${LINE}" >&2
+  exit 1
+fi
+
+LOG_DIR="${SCRIPT_DIR}/logs"
+mkdir -p "$LOG_DIR"
+cd "$PROJECT_ROOT"
+
+LOG_PATH="${LOG_DIR}/${TAG}_${IDX}_${RUN_NAME}.log"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] RUN_NAME=${RUN_NAME}" | tee -a "$LOG_PATH"
+echo "COMMAND: ${COMMAND}" | tee -a "$LOG_PATH"
+
+bash -lc "$COMMAND" >> "$LOG_PATH" 2>&1
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Completed ${RUN_NAME}" | tee -a "$LOG_PATH"

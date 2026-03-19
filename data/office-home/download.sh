@@ -22,7 +22,7 @@ fi
 echo "Unzipping..."
 mkdir -p "$OUT_DIR"
 unzip -o "$ZIP_NAME" -d "$OUT_DIR"
+mv "$OUT_DIR/OfficeHomeDataset_10072016"/* "images/"
+rm -rf "$OUT_DIR" "$ZIP_NAME"
 
 echo "Done."
-echo "ZIP: $SCRIPT_DIR/$ZIP_NAME"
-echo "Extracted to: $SCRIPT_DIR/$OUT_DIR"
