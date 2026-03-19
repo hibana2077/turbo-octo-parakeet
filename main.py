@@ -509,11 +509,11 @@ def main():
                         help="Run prediction on validation set every so many steps."
                              "Will always run one evaluation at the end of training.")
 
-    parser.add_argument("--beta", default=0.1, type=float,   #alpha 
+    parser.add_argument("--beta", default=0.1, type=float,   #alpha (1.0 for oh), (0.1 for visda and domainnet)
                         help="The importance of the adversarial loss.")
-    parser.add_argument("--gamma", default=0.1, type=float,  #beta
+    parser.add_argument("--gamma", default=0.1, type=float,  #beta (0.01 for oh), (0.1 for visda and domainnet)
                         help="The importance of the local adversarial loss.")
-    parser.add_argument("--theta", default=0.1, type=float,  #gamma
+    parser.add_argument("--theta", default=0.1, type=float,  #gamma (0.1 for oh), (0.1 for visda and domainnet)
                         help="The importance of the IM loss.")
     parser.add_argument("--use_im", default=False, action="store_true",
                         help="Use information maximization loss.")
