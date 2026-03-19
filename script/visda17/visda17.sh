@@ -3,7 +3,7 @@
 #PBS -q gpuvolta
 #PBS -l ngpus=1
 #PBS -l ncpus=12
-#PBS -l mem=8GB
+#PBS -l mem=18GB
 #PBS -l walltime=20:00:00
 #PBS -l wd
 #PBS -l storage=scratch/cp23+gdata/yp87
@@ -16,10 +16,10 @@ set -euo pipefail
 export HF_HOME="/scratch/cp23/lw4988/hf_home"
 export HF_HUB_OFFLINE=1
 
-TAG="officehome_jfpd_sweep"
+TAG="visda17_jfpd_sweep"
 SCRIPT_DIR="./"
 PROJECT_ROOT="../../"
-EXP_FILE="${SCRIPT_DIR}/officehome.txt"
+EXP_FILE="${SCRIPT_DIR}/visda17.txt"
 
 IDX="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}"
 LINE_NO=$((IDX + 1))
