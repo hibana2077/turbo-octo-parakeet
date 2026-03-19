@@ -40,7 +40,24 @@ done
 for zip_file in ./*.zip; do
     [ -e "$zip_file" ] || continue
     echo "Unzipping: $zip_file"
-    unzip -o "$zip_file"
+    unzip -o -q "$zip_file"
 done
+
+# Remove zip files after extraction
+rm -f ./*.zip
+
+# Add the dataset prefix to the txt files
+sed -i 's#^#data/DomainNet/clipart/#' clipart_train.txt
+sed -i 's#^#data/DomainNet/clipart/#' clipart_test.txt
+sed -i 's#^#data/DomainNet/infograph/#' infograph_train.txt
+sed -i 's#^#data/DomainNet/infograph/#' infograph_test.txt
+sed -i 's#^#data/DomainNet/painting/#' painting_train.txt
+sed -i 's#^#data/DomainNet/painting/#' painting_test.txt
+sed -i 's#^#data/DomainNet/quickdraw/#' quickdraw_train.txt
+sed -i 's#^#data/DomainNet/quickdraw/#' quickdraw_test.txt
+sed -i 's#^#data/DomainNet/real/#' real_train.txt
+sed -i 's#^#data/DomainNet/real/#' real_test.txt
+sed -i 's#^#data/DomainNet/sketch/#' sketch_train.txt
+sed -i 's#^#data/DomainNet/sketch/#' sketch_test.txt
 
 echo "Done."
