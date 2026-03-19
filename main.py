@@ -175,15 +175,16 @@ def setup(args, prefix_saved_mode):
     if(not os.path.exists('./output/'+args.dataset)):
         os.makedirs('./output/'+args.dataset)
     #print('prefix_saved_mode ',prefix_saved_mode)
-    for file in os.listdir('./output/'+args.dataset):
-        #print('file', file)
-        if(prefix_saved_mode in file and 'checkpoint' in file ):
+    if not args.disable_best_acc_cache:
+        for file in os.listdir('./output/'+args.dataset):
             #print('file', file)
-            file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
-            if file_acc is None:
-                continue
-            if(best_acc > file_acc):
-                os.remove('./output/'+args.dataset+'/'+file)
+            if(prefix_saved_mode in file and 'checkpoint' in file ):
+                #print('file', file)
+                file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
+                if file_acc is None:
+                    continue
+                if(best_acc > file_acc):
+                    os.remove('./output/'+args.dataset+'/'+file)
 
     if(best_model is not None):
         model_checkpoint = os.path.join(args.output_dir, args.dataset, best_model)
@@ -279,13 +280,16 @@ def valid(args, model, writer, test_loader, global_step, cp_mask, ad_net, prefix
 
 def train(args, model,cp_mask, prefix_saved_mode):
     best_acc = 0
-    for file in os.listdir('./output/'+args.dataset):
-        if(prefix_saved_mode in file and 'checkpoint' in file ):
-            file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
-            if file_acc is None:
-                continue
-            if(best_acc < file_acc):
-                best_acc = file_acc
+    if not args.disable_best_acc_cache:
+        for file in os.listdir('./output/'+args.dataset):
+            if(prefix_saved_mode in file and 'checkpoint' in file ):
+                file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
+                if file_acc is None:
+                    continue
+                if(best_acc < file_acc):
+                    best_acc = file_acc
+    else:
+        logger.info("Best-acc checkpoint cache disabled. Start from best_acc=0.0 for this run.")
 
     if args.local_rank in [-1, 0]:
         os.makedirs(os.path.join(args.output_dir, args.dataset), exist_ok=True)
@@ -448,13 +452,14 @@ def train(args, model,cp_mask, prefix_saved_mode):
 
                 save_model(args, model, prefix_saved_mode +str(best_acc) +'_',  is_adv=False, )
                 save_model(args, ad_net_local, prefix_saved_mode +str(best_acc) +'_', is_adv=True, )
-                for file in os.listdir('./output/'+args.dataset):
-                    if(prefix_saved_mode in file and 'checkpoint' in file ):
-                        file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
-                        if file_acc is None:
-                            continue
-                        if(best_acc > file_acc):
-                            os.remove('./output/'+args.dataset+'/'+file)
+                if not args.disable_best_acc_cache:
+                    for file in os.listdir('./output/'+args.dataset):
+                        if(prefix_saved_mode in file and 'checkpoint' in file ):
+                            file_acc = extract_checkpoint_acc(file, prefix_saved_mode)
+                            if file_acc is None:
+                                continue
+                            if(best_acc > file_acc):
+                                os.remove('./output/'+args.dataset+'/'+file)
 
                 if classWise_acc is not None:
                     best_classWise_acc = classWise_acc
@@ -524,6 +529,8 @@ def main():
                         help="The layer that incorporates local alignment.")
     parser.add_argument("--is_test", default=False, action="store_true",
                         help="If in test mode.")
+    parser.add_argument("--disable_best_acc_cache", default=False, action="store_true",
+                        help="Ignore existing checkpoints for best_acc initialization and cleanup.")
 
     parser.add_argument("--learning_rate", default=0.05, type=float,
                         help="The initial learning rate for SGD.")
