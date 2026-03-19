@@ -38,9 +38,9 @@ if [[ "$RUN_NAME" == "$LINE" || -z "${COMMAND:-}" ]]; then
   exit 1
 fi
 
-LOG_DIR="${SCRIPT_DIR}/logs"
-mkdir -p "$LOG_DIR"
+LOG_DIR="./logs"
 cd "$PROJECT_ROOT"
+mkdir -p "$LOG_DIR"
 
 LOG_PATH="${LOG_DIR}/${TAG}_${IDX}_${RUN_NAME}.log"
 
