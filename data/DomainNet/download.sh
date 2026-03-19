@@ -36,4 +36,11 @@ for url in "${URLS[@]}"; do
     wget -c "$url"
 done
 
+# Unzip all downloaded zip files in this directory
+for zip_file in ./*.zip; do
+    [ -e "$zip_file" ] || continue
+    echo "Unzipping: $zip_file"
+    unzip -o "$zip_file"
+done
+
 echo "Done."
