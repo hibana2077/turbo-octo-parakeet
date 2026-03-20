@@ -134,6 +134,7 @@ def parse_args() -> argparse.Namespace:
         help="Optimizer name",
     )
     parser.add_argument("--learning_rate", type=float, default=8e-3, help="Base learning rate")
+    parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for SGD")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--warmup_epochs", type=int, default=10, help="Warmup epochs")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
@@ -215,6 +216,7 @@ def configure_cdtrans(args: argparse.Namespace):
 
     cfg.SOLVER.OPTIMIZER_NAME = args.optimizer
     cfg.SOLVER.BASE_LR = args.learning_rate
+    cfg.SOLVER.MOMENTUM = args.momentum
     cfg.SOLVER.WEIGHT_DECAY = args.weight_decay
     cfg.SOLVER.WEIGHT_DECAY_BIAS = args.weight_decay
     cfg.SOLVER.WARMUP_EPOCHS = args.warmup_epochs
