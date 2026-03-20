@@ -318,18 +318,46 @@ def train(args, model,cp_mask, prefix_saved_mode):
     ad_net_local.to(args.device)
     
     optimizer_ad = torch.optim.SGD(list(ad_net.parameters())+list(ad_net_local.parameters()),
-                            lr=args.learning_rate/10, 
+                            lr=args.learning_rate/10,
                             momentum=0.9,
                             weight_decay=args.weight_decay)
-    
-    optimizer = torch.optim.SGD([
-                                    {'params': model.transformer.parameters(), 'lr': args.learning_rate/10},
-                                    {'params': model.decoder.parameters(), 'lr': args.learning_rate},
-                                    {'params': model.head.parameters()},
-                                ],
-                                lr=args.learning_rate,
-                                momentum=0.9,
-                                weight_decay=args.weight_decay)
+
+    if args.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(
+            [
+                {'params': model.transformer.parameters(), 'lr': args.adamw_backbone_lr},
+                {'params': model.decoder.parameters(), 'lr': args.adamw_head_lr},
+                {'params': model.head.parameters(), 'lr': args.adamw_head_lr},
+            ],
+            weight_decay=args.adamw_weight_decay,
+        )
+    else:
+        optimizer = torch.optim.SGD([
+                                        {'params': model.transformer.parameters(), 'lr': args.learning_rate/10},
+                                        {'params': model.decoder.parameters(), 'lr': args.learning_rate},
+                                        {'params': model.head.parameters()},
+                                    ],
+                                    lr=args.learning_rate,
+                                    momentum=0.9,
+                                    weight_decay=args.weight_decay)
+
+    if args.optimizer == "adamw":
+        logger.info(
+            "Model optimizer: AdamW (backbone_lr=%s, head_lr=%s, weight_decay=%s); adversarial optimizer: SGD (lr=%s, weight_decay=%s)",
+            args.adamw_backbone_lr,
+            args.adamw_head_lr,
+            args.adamw_weight_decay,
+            args.learning_rate / 10,
+            args.weight_decay,
+        )
+    else:
+        logger.info(
+            "Model optimizer: SGD (base_lr=%s, weight_decay=%s); adversarial optimizer: SGD (lr=%s, weight_decay=%s)",
+            args.learning_rate,
+            args.weight_decay,
+            args.learning_rate / 10,
+            args.weight_decay,
+        )
     
     t_total = args.num_steps
     if args.decay_type == "cosine":
@@ -532,10 +560,18 @@ def main():
     parser.add_argument("--disable_best_acc_cache", default=False, action="store_true",
                         help="Ignore existing checkpoints for best_acc initialization and cleanup.")
 
+    parser.add_argument("--optimizer", choices=["sgd", "adamw"], default="sgd",
+                        help="Optimizer for the main model parameters.")
     parser.add_argument("--learning_rate", default=0.05, type=float,
-                        help="The initial learning rate for SGD.")
+                        help="The initial learning rate for SGD (main model + adversarial nets).")
     parser.add_argument("--weight_decay", default=0, type=float,
-                        help="Weight deay if we apply some.")
+                        help="Weight decay for SGD optimizers.")
+    parser.add_argument("--adamw_backbone_lr", default=5e-5, type=float,
+                        help="Backbone learning rate when --optimizer adamw.")
+    parser.add_argument("--adamw_head_lr", default=5e-4, type=float,
+                        help="Decoder/head learning rate when --optimizer adamw.")
+    parser.add_argument("--adamw_weight_decay", default=0.01, type=float,
+                        help="Weight decay when --optimizer adamw.")
     parser.add_argument("--num_steps", default=5000, type=int,
                         help="Total number of training epochs to perform.")
     parser.add_argument("--decay_type", choices=["cosine", "linear"], default="cosine",
