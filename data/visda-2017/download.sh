@@ -13,5 +13,8 @@ rm *.tar
 
 echo "Done."
 
+mv train/image_list.txt train/train_list.txt
+mv validation/image_list.txt validation/validation_list.txt
+
 sed -i 's#^#data/visda-2017/train/#' train/train_list.txt
 sed -i 's#^#data/visda-2017/validation/#' validation/validation_list.txt
