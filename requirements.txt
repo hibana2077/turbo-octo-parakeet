@@ -71,3 +71,5 @@ ptflops  # For FLOPs computation
 # flake8>=3.9.0
 
 datasets
+
+yacs
