@@ -130,7 +130,7 @@ class VisionTransformer(nn.Module):
         for i, blk in enumerate(self.backbone.blocks):
             x = blk(x)
             if i == target_layer and ad_net is not None:
-                loss_ad, updated_cp_mask = self._local_adversarial(x, ad_net, is_source=is_source)
+                loss_ad = self._local_adversarial(x, ad_net, is_source=is_source)
 
         x = self.backbone.norm(x)
         return x, loss_ad, updated_cp_mask
@@ -139,20 +139,14 @@ class VisionTransformer(nn.Module):
         batch_size, token_count, hidden_size = tokens.shape
         patch_tokens = tokens[:, self.prefix_tokens :, :]
         if patch_tokens.numel() == 0:
-            return tokens.new_zeros(()), torch.eye(token_count, device=tokens.device)
+            return tokens.new_zeros(())
 
         heads = self.backbone_cfg.num_heads
         head_dim = hidden_size // heads
         patch_heads = patch_tokens.view(batch_size, -1, heads, head_dim).permute(0, 2, 1, 3).contiguous()
 
-        ad_out, loss_ad = lossZoo.adv_local(patch_heads, ad_net, is_source=is_source)
-
-        eps = 1e-10
-        entropy = -ad_out * torch.log2(ad_out + eps) - (1.0 - ad_out) * torch.log2(1.0 - ad_out + eps)
-        score = entropy.sum(dim=0).sum(dim=0)
-
-        updated_cp = self._build_cp_mask(score, prefix_tokens=self.prefix_tokens)
-        return loss_ad, updated_cp
+        _, loss_ad = lossZoo.adv_local(patch_heads, ad_net, is_source=is_source)
+        return loss_ad
 
     def _build_cp_mask(self, score: torch.Tensor, prefix_tokens: int):
         score = score.float()
@@ -188,9 +182,8 @@ class VisionTransformer(nn.Module):
             x_t_tokens, loss_ad_t, _ = self._forward_tokens(x_t, ad_net=ad_net, is_source=False, cp_mask=cp_mask)
             logits_t = self.head(x_t_tokens[:, 0])
 
-            rec_t = self.decoder(x_t_tokens[:, self.prefix_tokens :, :])
-            target_patch = self._target_patches(x_t)
-            loss_rec = self.criterion(rec_t, target_patch)
+            # FFTAT reconstruction branch is kept as a no-op for API compatibility.
+            loss_rec = x_s_tokens.new_zeros(())
             return logits_s, logits_t, (loss_ad_s + loss_ad_t) / 2.0, loss_rec, x_s_tokens, x_t_tokens, cp_mask
 
         return logits_s, None, None, cp_mask
