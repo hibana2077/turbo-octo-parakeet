@@ -31,12 +31,13 @@ def weights_init_classifier(m):
 
 
 class build_uda_transformer(nn.Module):
-    def __init__(self, num_classes, camera_num, view_num, cfg, factory):
+    def __init__(self, num_classes, camera_num, view_num, cfg, factory, timm_model=""):
         super().__init__()
         _ = camera_num, view_num
 
         model_path = cfg.MODEL.PRETRAIN_PATH
         pretrain_choice = cfg.MODEL.PRETRAIN_CHOICE
+        self.timm_model = timm_model
         self.neck = cfg.MODEL.NECK
         self.neck_feat = cfg.TEST.NECK_FEAT
         self.task_type = cfg.MODEL.TASK_TYPE
@@ -77,6 +78,10 @@ class build_uda_transformer(nn.Module):
         elif pretrain_choice == "un_pretrain":
             self.base.load_un_param(model_path)
             print("Loading trans_tune model......from {}".format(model_path))
+        elif pretrain_choice == "timm":
+            self.base.load_timm_param(self.timm_model, model_path)
+            source = model_path if model_path else self.timm_model
+            print("Loading timm pretrained backbone......from {}".format(source))
         elif pretrain_choice == "pretrain":
             if model_path:
                 self.load_param_finetune(model_path)
@@ -167,9 +172,9 @@ __factory_hh = {
 }
 
 
-def make_model(cfg, num_class, camera_num, view_num):
+def make_model(cfg, num_class, camera_num, view_num, timm_model=""):
     if cfg.MODEL.NAME != "transformer":
         raise NotImplementedError("Only transformer model is vendored in cdtrans_core")
-    model = build_uda_transformer(num_class, camera_num, view_num, cfg, __factory_hh)
+    model = build_uda_transformer(num_class, camera_num, view_num, cfg, __factory_hh, timm_model=timm_model)
     print("===========building uda transformer===========")
     return model

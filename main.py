@@ -104,8 +104,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pretrain_choice",
         type=str,
-        default="pretrain",
-        choices=["pretrain", "imagenet", "un_pretrain"],
+        default="timm",
+        choices=["pretrain", "imagenet", "un_pretrain", "timm"],
         help="CDTrans pretrain mode",
     )
     parser.add_argument(
@@ -113,6 +113,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="",
         help="Path to pretrained checkpoint for CDTrans backbone/model",
+    )
+    parser.add_argument(
+        "--timm_model",
+        type=str,
+        default="vit_base_patch16_224.augreg2_in21k_ft_in1k",
+        help="timm model name used when --pretrain_choice timm",
     )
 
     parser.add_argument("--img_size", type=int, default=256, help="Input image size")
@@ -497,8 +503,10 @@ def main() -> None:
         raise ValueError("--jfpd_alpha must be in [0, 1].")
     if args.pseudo_threshold < 0.0 or args.pseudo_threshold > 1.0:
         raise ValueError("--pseudo_threshold must be in [0, 1].")
-    if args.pretrain_choice != "pretrain" and not args.pretrained_path:
+    if args.pretrain_choice in {"imagenet", "un_pretrain"} and not args.pretrained_path:
         raise ValueError("--pretrained_path is required when --pretrain_choice is not 'pretrain'.")
+    if args.pretrain_choice == "timm" and not args.timm_model:
+        raise ValueError("--timm_model is required when --pretrain_choice is 'timm'.")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -521,7 +529,13 @@ def main() -> None:
 
     camera_num = 0
     view_num = 0
-    model = make_model(cfg, num_class=args.num_classes, camera_num=camera_num, view_num=view_num)
+    model = make_model(
+        cfg,
+        num_class=args.num_classes,
+        camera_num=camera_num,
+        view_num=view_num,
+        timm_model=args.timm_model,
+    )
     model.to(device)
 
     loss_func, center_criterion = make_loss(cfg, num_classes=args.num_classes)

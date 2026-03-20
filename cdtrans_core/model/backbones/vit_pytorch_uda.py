@@ -519,16 +519,19 @@ class TransReID(nn.Module):
         x = self.forward_features(x, x2, cam_label, view_label, domain_norm, cls_embed_specific,inference_target_only)
         return x
 
-    def load_param(self, model_path):
-        param_dict = torch.load(model_path, map_location='cpu')
-        if 'model' in param_dict:
+    def load_param_dict(self, param_dict, source="state_dict"):
+        if isinstance(param_dict, dict) and 'model' in param_dict:
             param_dict = param_dict['model']
-        if 'state_dict' in param_dict:
+        if isinstance(param_dict, dict) and 'state_dict' in param_dict:
             param_dict = param_dict['state_dict']
 
+        loaded = 0
+        skipped = []
         for k, v in param_dict.items():
-            # print('k v is {} {}'.format(k,v))
-            if 'head' in k or 'dist' in k:
+            if 'head' in k or 'dist' in k or 'pre_logits' in k:
+                continue
+            if k not in self.state_dict():
+                skipped.append(k)
                 continue
             if 'patch_embed.proj.weight' in k and len(v.shape) < 4:
                 # For old models that I trained prior to conv based patchification
@@ -536,18 +539,24 @@ class TransReID(nn.Module):
                 v = v.reshape(O, -1, H, W)
             elif k == 'pos_embed' and v.shape != self.pos_embed.shape:
                 # To resize pos embedding when using model at different size from pretrained weights
-                if 'distilled' in model_path:
+                if isinstance(source, str) and 'distilled' in source:
                     print('distill need to choose right cls token in the pth')
                     v = torch.cat([v[:, 0:1], v[:, 2:]], dim=1)
                 v = resize_pos_embed(v, self.pos_embed, self.patch_embed.num_y, self.patch_embed.num_x)
-                # self.state_dict()[k].copy_(revise)
             try:
                 self.state_dict()[k].copy_(v)
-
-
-            except:
+                loaded += 1
+            except Exception:
                 print('===========================ERROR=========================')
                 print('shape do not match in k :{}: param_dict{} vs self.state_dict(){}'.format(k, v.shape, self.state_dict()[k].shape))
+
+        print('Loaded {} backbone tensors from {}'.format(loaded, source))
+        if skipped:
+            print('Skipped {} unmatched tensors from {}'.format(len(skipped), source))
+
+    def load_param(self, model_path):
+        param_dict = torch.load(model_path, map_location='cpu')
+        self.load_param_dict(param_dict, source=model_path)
 
     def load_un_param(self, trained_path):
         param_dict = torch.load(trained_path)
@@ -564,6 +573,20 @@ class TransReID(nn.Module):
             if 'fc' in i or 'head' in i:
                 continue
             self.state_dict()[i].copy_(param_dict[i])
+
+    def load_timm_param(self, model_name, checkpoint_path=''):
+        if checkpoint_path:
+            param_dict = torch.load(checkpoint_path, map_location='cpu')
+            self.load_param_dict(param_dict, source=checkpoint_path)
+            return
+
+        try:
+            import timm
+        except ImportError as exc:
+            raise ImportError("timm is required for --pretrain_choice timm.") from exc
+
+        timm_model = timm.create_model(model_name, pretrained=True)
+        self.load_param_dict(timm_model.state_dict(), source='timm::{}'.format(model_name))
 
 
 def resize_pos_embed(posemb, posemb_new, hight, width):
