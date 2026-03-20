@@ -11,9 +11,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.cuda import amp
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from data.data_list_image import ImageList, ImageListIndex
 from jfpd.losses import jfpd_loss
@@ -276,13 +274,14 @@ def evaluate(
     model: torch.nn.Module,
     test_loader: DataLoader,
     device: torch.device,
-) -> Tuple[float, Optional[str]]:
+) -> Tuple[float, float, int, Optional[str]]:
     model.eval()
     all_preds, all_labels = [], []
+    total_loss = 0.0
+    total_samples = 0
 
-    iterator = tqdm(test_loader, desc="Validating", dynamic_ncols=True)
     with torch.no_grad():
-        for batch in iterator:
+        for batch in test_loader:
             x, y = batch
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
@@ -298,19 +297,24 @@ def evaluate(
             )
             _ = logits_s, logits_f
 
+            batch_loss = F.cross_entropy(logits_t, y)
             preds = torch.argmax(logits_t, dim=1)
             all_preds.append(preds.cpu().numpy())
             all_labels.append(y.cpu().numpy())
+            batch_size = y.size(0)
+            total_loss += float(batch_loss.item()) * batch_size
+            total_samples += batch_size
 
     preds_np = np.concatenate(all_preds, axis=0)
     labels_np = np.concatenate(all_labels, axis=0)
+    avg_loss = total_loss / max(total_samples, 1)
 
     if args.dataset.lower() == "visda17":
         accuracy, classwise_acc = visda_acc(preds_np, labels_np)
-        return float(accuracy), classwise_acc
+        return float(accuracy), avg_loss, total_samples, classwise_acc
 
     accuracy = float((preds_np == labels_np).mean() * 100.0)
-    return accuracy, None
+    return accuracy, avg_loss, total_samples, None
 
 
 def save_checkpoint(
@@ -346,7 +350,7 @@ def train(
     test_loader: DataLoader,
     device: torch.device,
 ) -> None:
-    scaler = amp.GradScaler(enabled=(args.amp and device.type == "cuda"))
+    scaler = torch.amp.GradScaler(device.type, enabled=(args.amp and device.type == "cuda"))
     best_acc = -1.0
 
     steps_per_epoch = min(len(source_loader), len(target_loader))
@@ -375,7 +379,7 @@ def train(
 
             optimizer.zero_grad(set_to_none=True)
 
-            with amp.autocast(enabled=scaler.is_enabled()):
+            with torch.amp.autocast(device_type=device.type, enabled=scaler.is_enabled()):
                 (score_s, feat_s, _), (score_t, feat_t, _), (score_fusion, _, _), _ = model(
                     x_s,
                     x_t,
@@ -459,11 +463,24 @@ def train(
                 )
 
         if epoch % cfg.SOLVER.EVAL_PERIOD == 0:
-            acc, classwise = evaluate(args, model, test_loader, device)
+            acc, val_loss, val_samples, classwise = evaluate(args, model, test_loader, device)
             if classwise is None:
-                logger.info("Eval Epoch %d: accuracy=%.2f", epoch, acc)
+                logger.info(
+                    "Eval Epoch %d: accuracy=%.2f val_loss=%.4f samples=%d",
+                    epoch,
+                    acc,
+                    val_loss,
+                    val_samples,
+                )
             else:
-                logger.info("Eval Epoch %d: accuracy=%.2f classwise=%s", epoch, acc, classwise)
+                logger.info(
+                    "Eval Epoch %d: accuracy=%.2f val_loss=%.4f samples=%d classwise=%s",
+                    epoch,
+                    acc,
+                    val_loss,
+                    val_samples,
+                    classwise,
+                )
 
             if acc > best_acc:
                 best_acc = acc
