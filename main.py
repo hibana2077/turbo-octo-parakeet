@@ -145,9 +145,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label_smooth", action="store_true", help="Enable label smoothing")
     parser.add_argument("--amp", action="store_true", help="Enable automatic mixed precision")
 
-    parser.add_argument("--target_loss_weight", type=float, default=1.0, help="Weight of target pseudo-label CE loss")
-    parser.add_argument("--distill_weight", type=float, default=1.0, help="Weight of CDTrans distillation loss")
-    parser.add_argument("--pseudo_threshold", type=float, default=0.0, help="Confidence threshold for pseudo labels")
+    parser.add_argument("--target_loss_weight", type=float, default=0.6, help="Weight of target pseudo-label CE loss")
+    parser.add_argument("--distill_weight", type=float, default=0.0, help="Weight of CDTrans distillation loss")
+    parser.add_argument("--pseudo_threshold", type=float, default=0.6, help="Confidence threshold for pseudo labels")
 
     parser.add_argument("--use_jfpd", action="store_true", help="Enable JFPD regularization")
     parser.add_argument("--jfpd_lambda", type=float, default=0.1, help="JFPD loss weight")
