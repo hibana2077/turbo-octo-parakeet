@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_FILE="${SCRIPT_DIR}/officehome.txt"
 
-JFPD_LAMBDAS=(1.0 0.1 0.01)
+JFPD_LAMBDAS=(1.0 0.1)
 TRAIN_BATCH_SIZES=(128 256)
 MAX_EPOCHS=40
 WARMUP_EPOCHS=10
