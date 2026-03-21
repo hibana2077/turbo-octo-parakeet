@@ -4,7 +4,7 @@
 #PBS -l ngpus=1
 #PBS -l ncpus=12
 #PBS -l mem=12GB
-#PBS -l walltime=01:25:00
+#PBS -l walltime=02:00:00
 #PBS -l wd
 #PBS -l storage=scratch/cp23+gdata/yp87
 #PBS -r y
@@ -38,7 +38,7 @@ if [[ "$RUN_NAME" == "$LINE" || -z "${COMMAND:-}" ]]; then
   exit 1
 fi
 
-LOG_DIR="./logs"
+LOG_DIR="${SCRIPT_DIR}/logs"
 cd "$PROJECT_ROOT"
 mkdir -p "$LOG_DIR"
 
