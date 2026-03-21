@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_FILE="${SCRIPT_DIR}/officehome_ac.txt"
 
-OPTIMIZER="AdamW"
-LEARNING_RATE_VALUES=(3e-4 3e-3)
+OPTIMIZER="SGD"
+LEARNING_RATE_VALUES=(1e-2)
 WEIGHT_DECAY_VALUES=(5e-4 1e-3)
 SPLIT_LAYER_VALUES=(4 8)
 TG_LAYER_VALUES=(1 2)
@@ -14,7 +14,7 @@ LAMBDA_PAT_VALUES=(0.03 0.3)
 LAMBDA_SC_VALUES=(0.003)
 JFPD_LAMBDA_VALUES=(0.1 1.0)
 PSEUDO_THRESHOLD_VALUES=(0.5 0.7)
-TRAIN_BATCH_SIZE_VALUES=(16 128)
+TRAIN_BATCH_SIZE_VALUES=(64 128)
 
 MAX_EPOCHS=40
 WARMUP_EPOCHS=10
@@ -61,7 +61,7 @@ for TRAIN_BATCH_SIZE in "${TRAIN_BATCH_SIZE_VALUES[@]}"; do
                   for PSEUDO_THRESHOLD in "${PSEUDO_THRESHOLD_VALUES[@]}"; do
                     PSEUDO_TAG="$(float_tag "$PSEUDO_THRESHOLD")"
 
-                    RUN_NAME="${BASE_NAME}_tb${TRAIN_BATCH_SIZE}_optaw_lr${LR_TAG}_wd${WD_TAG}_sl${SPLIT_LAYER}_tg${TG_LAYER}_ld${DIS_TAG}_lp${PAT_TAG}_ls${SC_TAG}_jl${JFPD_TAG}_pth${PSEUDO_TAG}_me${MAX_EPOCHS}"
+                    RUN_NAME="${BASE_NAME}_tb${TRAIN_BATCH_SIZE}_optsgd_lr${LR_TAG}_wd${WD_TAG}_sl${SPLIT_LAYER}_tg${TG_LAYER}_ld${DIS_TAG}_lp${PAT_TAG}_ls${SC_TAG}_jl${JFPD_TAG}_pth${PSEUDO_TAG}_me${MAX_EPOCHS}"
                     CMD=".venv/bin/python3 main.py"
                     CMD+=" --dataset office-home"
                     CMD+=" --name ${RUN_NAME}"
