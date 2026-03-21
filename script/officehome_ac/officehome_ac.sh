@@ -3,8 +3,8 @@
 #PBS -q gpuhopper
 #PBS -l ngpus=1
 #PBS -l ncpus=12
-#PBS -l mem=8GB
-#PBS -l walltime=02:25:00
+#PBS -l mem=12GB
+#PBS -l walltime=01:25:00
 #PBS -l wd
 #PBS -l storage=scratch/cp23+gdata/yp87
 #PBS -r y
