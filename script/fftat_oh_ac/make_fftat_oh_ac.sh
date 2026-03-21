@@ -4,14 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_FILE="${SCRIPT_DIR}/fftat_oh_ac.txt"
 
-LAMBDA_DIS_VALUES=(1.0 0.1 0.01)
-LAMBDA_PAT_VALUES=(1.0 0.1 0.01)
-LAMBDA_SC_VALUES=(0.1 0.01)
-TRAIN_BATCH_SIZES=(32 64)
+LAMBDA_DIS_VALUES=(0.01)
+LAMBDA_PAT_VALUES=(0.1)
+LAMBDA_SC_VALUES=(0.1)
+TRAIN_BATCH_SIZES=(64 128)
+WARMUP_EPOCHS_VALUES=(1 10 100)
+LEARNING_RATE_VALUES=(3e-3 3e-2)
 
 MAX_EPOCHS=200
-WARMUP_EPOCHS=10
-LEARNING_RATE=3e-3
 MOMENTUM=0.9
 WEIGHT_DECAY=1e-4
 IMG_SIZE=256
@@ -42,32 +42,38 @@ for TRAIN_BATCH_SIZE in "${TRAIN_BATCH_SIZES[@]}"; do
       for LAMBDA_SC in "${LAMBDA_SC_VALUES[@]}"; do
         SC_TAG="$(float_tag "$LAMBDA_SC")"
 
-        RUN_NAME="${BASE_NAME}_ld${DIS_TAG}_lp${PAT_TAG}_ls${SC_TAG}_tb${TRAIN_BATCH_SIZE}_me${MAX_EPOCHS}"
-        CMD=".venv/bin/python3 main.py"
-        CMD+=" --dataset office-home"
-        CMD+=" --name ${RUN_NAME}"
-        CMD+=" --source_list data/office-home/${SOURCE_DOMAIN}.txt"
-        CMD+=" --target_list data/office-home/${TARGET_DOMAIN}.txt"
-        CMD+=" --test_list data/office-home/${TARGET_DOMAIN}.txt"
-        CMD+=" --num_classes 65"
-        CMD+=" --img_size ${IMG_SIZE}"
-        CMD+=" --train_batch_size ${TRAIN_BATCH_SIZE}"
-        CMD+=" --eval_batch_size ${EVAL_BATCH_SIZE}"
-        CMD+=" --max_epochs ${MAX_EPOCHS}"
-        CMD+=" --warmup_epochs ${WARMUP_EPOCHS}"
-        CMD+=" --log_period ${LOG_PERIOD}"
-        CMD+=" --eval_period ${EVAL_PERIOD}"
-        CMD+=" --optimizer SGD"
-        CMD+=" --learning_rate ${LEARNING_RATE}"
-        CMD+=" --momentum ${MOMENTUM}"
-        CMD+=" --weight_decay ${WEIGHT_DECAY}"
-        CMD+=" --gpu_id ${GPU_ID}"
-        CMD+=" --timm_model ${TIMM_MODEL}"
-        CMD+=" --lambda_dis ${LAMBDA_DIS}"
-        CMD+=" --lambda_pat ${LAMBDA_PAT}"
-        CMD+=" --lambda_sc ${LAMBDA_SC}"
+        for WARMUP_EPOCHS in "${WARMUP_EPOCHS_VALUES[@]}"; do
+          for LEARNING_RATE in "${LEARNING_RATE_VALUES[@]}"; do
+            LR_TAG="$(float_tag "$LEARNING_RATE")"
 
-        printf '%s\t%s\n' "$RUN_NAME" "$CMD" >> "$OUT_FILE"
+            RUN_NAME="${BASE_NAME}_ld${DIS_TAG}_lp${PAT_TAG}_ls${SC_TAG}_tb${TRAIN_BATCH_SIZE}_wu${WARMUP_EPOCHS}_lr${LR_TAG}_me${MAX_EPOCHS}"
+            CMD=".venv/bin/python3 main.py"
+            CMD+=" --dataset office-home"
+            CMD+=" --name ${RUN_NAME}"
+            CMD+=" --source_list data/office-home/${SOURCE_DOMAIN}.txt"
+            CMD+=" --target_list data/office-home/${TARGET_DOMAIN}.txt"
+            CMD+=" --test_list data/office-home/${TARGET_DOMAIN}.txt"
+            CMD+=" --num_classes 65"
+            CMD+=" --img_size ${IMG_SIZE}"
+            CMD+=" --train_batch_size ${TRAIN_BATCH_SIZE}"
+            CMD+=" --eval_batch_size ${EVAL_BATCH_SIZE}"
+            CMD+=" --max_epochs ${MAX_EPOCHS}"
+            CMD+=" --warmup_epochs ${WARMUP_EPOCHS}"
+            CMD+=" --log_period ${LOG_PERIOD}"
+            CMD+=" --eval_period ${EVAL_PERIOD}"
+            CMD+=" --optimizer SGD"
+            CMD+=" --learning_rate ${LEARNING_RATE}"
+            CMD+=" --momentum ${MOMENTUM}"
+            CMD+=" --weight_decay ${WEIGHT_DECAY}"
+            CMD+=" --gpu_id ${GPU_ID}"
+            CMD+=" --timm_model ${TIMM_MODEL}"
+            CMD+=" --lambda_dis ${LAMBDA_DIS}"
+            CMD+=" --lambda_pat ${LAMBDA_PAT}"
+            CMD+=" --lambda_sc ${LAMBDA_SC}"
+
+            printf '%s\t%s\n' "$RUN_NAME" "$CMD" >> "$OUT_FILE"
+          done
+        done
       done
     done
   done
