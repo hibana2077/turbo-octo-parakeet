@@ -31,7 +31,6 @@ class TrainMeters:
     loss: float = 0.0
     loss_src: float = 0.0
     loss_tgt: float = 0.0
-    loss_distill: float = 0.0
     loss_jfpd: float = 0.0
     acc_src: float = 0.0
     steps: int = 0
@@ -41,14 +40,12 @@ class TrainMeters:
         loss: torch.Tensor,
         loss_src: torch.Tensor,
         loss_tgt: torch.Tensor,
-        loss_distill: torch.Tensor,
         loss_jfpd: torch.Tensor,
         acc_src: torch.Tensor,
     ) -> None:
         self.loss += float(loss.item())
         self.loss_src += float(loss_src.item())
         self.loss_tgt += float(loss_tgt.item())
-        self.loss_distill += float(loss_distill.item())
         self.loss_jfpd += float(loss_jfpd.item())
         self.acc_src += float(acc_src.item())
         self.steps += 1
@@ -59,7 +56,6 @@ class TrainMeters:
                 "loss": 0.0,
                 "loss_src": 0.0,
                 "loss_tgt": 0.0,
-                "loss_distill": 0.0,
                 "loss_jfpd": 0.0,
                 "acc_src": 0.0,
             }
@@ -67,7 +63,6 @@ class TrainMeters:
             "loss": self.loss / self.steps,
             "loss_src": self.loss_src / self.steps,
             "loss_tgt": self.loss_tgt / self.steps,
-            "loss_distill": self.loss_distill / self.steps,
             "loss_jfpd": self.loss_jfpd / self.steps,
             "acc_src": self.acc_src / self.steps,
         }
@@ -146,7 +141,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--amp", action="store_true", help="Enable automatic mixed precision")
 
     parser.add_argument("--target_loss_weight", type=float, default=0.6, help="Weight of target pseudo-label CE loss")
-    parser.add_argument("--distill_weight", type=float, default=0.0, help="Weight of CDTrans distillation loss")
     parser.add_argument("--pseudo_threshold", type=float, default=0.6, help="Confidence threshold for pseudo labels")
 
     parser.add_argument("--use_jfpd", action="store_true", help="Enable JFPD regularization")
@@ -165,11 +159,6 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
-
-
-def distill_loss(teacher_logits: torch.Tensor, student_logits: torch.Tensor) -> torch.Tensor:
-    teacher_prob = F.softmax(teacher_logits, dim=-1)
-    return torch.sum(-teacher_prob * F.log_softmax(student_logits, dim=-1), dim=-1).mean()
 
 
 def build_source_prototypes(
@@ -386,7 +375,7 @@ def train(
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast(device_type=device.type, enabled=scaler.is_enabled()):
-                (score_s, feat_s, _), (score_t, feat_t, _), (score_fusion, _, _), _ = model(
+                (score_s, feat_s, _), (score_t, feat_t, _), _, _ = model(
                     x_s,
                     x_t,
                     y_s,
@@ -406,9 +395,7 @@ def train(
                 else:
                     loss_tgt = torch.zeros((), device=device)
 
-                loss_distill = distill_loss(score_fusion, score_t)
-
-                total_loss = loss_src + args.target_loss_weight * loss_tgt + args.distill_weight * loss_distill
+                total_loss = loss_src + args.target_loss_weight * loss_tgt
 
                 loss_jfpd = torch.zeros((), device=device)
                 if args.use_jfpd:
@@ -448,13 +435,13 @@ def train(
             with torch.no_grad():
                 acc_src = (score_s.max(1)[1] == y_s).float().mean()
 
-            meters.update(total_loss, loss_src, loss_tgt, loss_distill, loss_jfpd, acc_src)
+            meters.update(total_loss, loss_src, loss_tgt, loss_jfpd, acc_src)
 
             if n_iter % cfg.SOLVER.LOG_PERIOD == 0:
                 avg = meters.avg()
                 current_lr = optimizer.param_groups[0]["lr"]
                 logger.info(
-                    "Epoch[%d/%d] Iter[%d/%d] loss=%.4f src=%.4f tgt=%.4f distill=%.4f jfpd=%.4f acc=%.4f lr=%.6f",
+                    "Epoch[%d/%d] Iter[%d/%d] loss=%.4f src=%.4f tgt=%.4f jfpd=%.4f acc=%.4f lr=%.6f",
                     epoch,
                     args.max_epochs,
                     n_iter,
@@ -462,7 +449,6 @@ def train(
                     avg["loss"],
                     avg["loss_src"],
                     avg["loss_tgt"],
-                    avg["loss_distill"],
                     avg["loss_jfpd"],
                     avg["acc_src"],
                     current_lr,
