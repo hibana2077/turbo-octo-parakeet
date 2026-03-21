@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="./"
 OUT_FILE="${SCRIPT_DIR}/officehome_ac.txt"
 
 JFPD_LAMBDAS=(1.0 0.1 0.01 0.0)
