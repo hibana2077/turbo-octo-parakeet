@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function
 
 import argparse
 import logging
+import math
 import os
 import random
 from dataclasses import dataclass
@@ -14,23 +15,23 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from data.data_list_image import ImageList, ImageListIndex
+from fftat_components import FFTATModel
+from fftat_losses import information_maximization_loss
 from jfpd.losses import jfpd_loss
+from utils.scheduler import WarmupCosineSchedule, WarmupLinearSchedule
 from utils.transform import get_transform
 from utils.utils import visda_acc
 
-from cdtrans_core.config import cfg as cd_cfg
-from cdtrans_core.loss import make_loss
-from cdtrans_core.model import make_model
-from cdtrans_core.solver import create_scheduler, make_optimizer
-
-logger = logging.getLogger("cdtrans_jfpd")
+logger = logging.getLogger("fftat_jfpd")
 
 
 @dataclass
 class TrainMeters:
     loss: float = 0.0
-    loss_src: float = 0.0
-    loss_tgt: float = 0.0
+    loss_clc: float = 0.0
+    loss_dis: float = 0.0
+    loss_pat: float = 0.0
+    loss_sc: float = 0.0
     loss_jfpd: float = 0.0
     acc_src: float = 0.0
     steps: int = 0
@@ -38,14 +39,18 @@ class TrainMeters:
     def update(
         self,
         loss: torch.Tensor,
-        loss_src: torch.Tensor,
-        loss_tgt: torch.Tensor,
+        loss_clc: torch.Tensor,
+        loss_dis: torch.Tensor,
+        loss_pat: torch.Tensor,
+        loss_sc: torch.Tensor,
         loss_jfpd: torch.Tensor,
         acc_src: torch.Tensor,
     ) -> None:
         self.loss += float(loss.item())
-        self.loss_src += float(loss_src.item())
-        self.loss_tgt += float(loss_tgt.item())
+        self.loss_clc += float(loss_clc.item())
+        self.loss_dis += float(loss_dis.item())
+        self.loss_pat += float(loss_pat.item())
+        self.loss_sc += float(loss_sc.item())
         self.loss_jfpd += float(loss_jfpd.item())
         self.acc_src += float(acc_src.item())
         self.steps += 1
@@ -54,24 +59,29 @@ class TrainMeters:
         if self.steps == 0:
             return {
                 "loss": 0.0,
-                "loss_src": 0.0,
-                "loss_tgt": 0.0,
+                "loss_clc": 0.0,
+                "loss_dis": 0.0,
+                "loss_pat": 0.0,
+                "loss_sc": 0.0,
                 "loss_jfpd": 0.0,
                 "acc_src": 0.0,
             }
+
         return {
             "loss": self.loss / self.steps,
-            "loss_src": self.loss_src / self.steps,
-            "loss_tgt": self.loss_tgt / self.steps,
+            "loss_clc": self.loss_clc / self.steps,
+            "loss_dis": self.loss_dis / self.steps,
+            "loss_pat": self.loss_pat / self.steps,
+            "loss_sc": self.loss_sc / self.steps,
             "loss_jfpd": self.loss_jfpd / self.steps,
             "acc_src": self.acc_src / self.steps,
         }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CDTrans-based UDA training with optional JFPD")
+    parser = argparse.ArgumentParser(description="FFTAT + JFPD UDA training")
 
-    parser.add_argument("--name", type=str, default="cdtrans_jfpd", help="Run name")
+    parser.add_argument("--name", type=str, default="fftat_jfpd", help="Run name")
     parser.add_argument("--dataset", type=str, required=True, help="Dataset tag for logging")
     parser.add_argument("--source_list", type=str, required=True, help="Source train list path")
     parser.add_argument("--target_list", type=str, required=True, help="Target train list path")
@@ -83,38 +93,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=1234, help="Random seed")
 
     parser.add_argument(
-        "--transformer_type",
-        type=str,
-        default="uda_vit_base_patch16_224_TransReID",
-        choices=["uda_vit_base_patch16_224_TransReID", "uda_vit_small_patch16_224_TransReID"],
-        help="CDTrans backbone type",
-    )
-    parser.add_argument(
-        "--block_pattern",
-        type=str,
-        default="3_branches",
-        choices=["3_branches", "normal"],
-        help="CDTrans block pattern",
-    )
-    parser.add_argument(
-        "--pretrain_choice",
-        type=str,
-        default="timm",
-        choices=["pretrain", "imagenet", "un_pretrain", "timm"],
-        help="CDTrans pretrain mode",
-    )
-    parser.add_argument(
-        "--pretrained_path",
-        type=str,
-        default="",
-        help="Path to pretrained checkpoint for CDTrans backbone/model",
-    )
-    parser.add_argument(
         "--timm_model",
         type=str,
         default="vit_base_patch16_224.augreg2_in21k_ft_in1k",
-        help="timm model name used when --pretrain_choice timm",
+        help="timm image encoder model name",
     )
+    parser.add_argument("--no_timm_pretrained", action="store_true", help="Disable timm pretrained weights")
+    parser.add_argument("--split_layer", type=int, default=6, help="Backbone layer index for FFTAT fusion/graph")
+    parser.add_argument("--tg_layers", type=int, default=1, help="Number of TG-guided blocks")
 
     parser.add_argument("--img_size", type=int, default=256, help="Input image size")
     parser.add_argument("--train_batch_size", type=int, default=32, help="Train batch size")
@@ -125,28 +111,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval_period", type=int, default=1, help="Evaluate every N epochs")
     parser.add_argument("--log_period", type=int, default=50, help="Log every N iterations")
 
-    parser.add_argument(
-        "--optimizer",
-        type=str,
-        default="SGD",
-        choices=["SGD", "Adam", "AdamW"],
-        help="Optimizer name",
-    )
-    parser.add_argument("--learning_rate", type=float, default=8e-3, help="Base learning rate")
+    parser.add_argument("--optimizer", type=str, default="SGD", choices=["SGD", "Adam", "AdamW"], help="Optimizer")
+    parser.add_argument("--learning_rate", type=float, default=3e-3, help="Base learning rate")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum for SGD")
     parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--warmup_epochs", type=int, default=10, help="Warmup epochs")
+    parser.add_argument("--decay_type", type=str, default="cosine", choices=["cosine", "linear"], help="LR decay type")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Gradient clipping norm")
-    parser.add_argument("--label_smooth", action="store_true", help="Enable label smoothing")
-    parser.add_argument("--amp", action="store_true", help="Enable automatic mixed precision")
+    parser.add_argument("--amp", action="store_true", help="Enable mixed precision training")
 
-    parser.add_argument("--target_loss_weight", type=float, default=0.6, help="Weight of target pseudo-label CE loss")
-    parser.add_argument("--pseudo_threshold", type=float, default=0.6, help="Confidence threshold for pseudo labels")
+    parser.add_argument("--lambda_dis", type=float, default=0.1, help="Weight for domain discriminator loss")
+    parser.add_argument("--lambda_pat", type=float, default=0.1, help="Weight for patch discriminator loss")
+    parser.add_argument("--lambda_sc", type=float, default=0.0, help="Weight for self-clustering (IM) loss")
 
     parser.add_argument("--use_jfpd", action="store_true", help="Enable JFPD regularization")
     parser.add_argument("--jfpd_lambda", type=float, default=0.1, help="JFPD loss weight")
     parser.add_argument("--jfpd_alpha", type=float, default=0.5, help="JFPD alpha in [0, 1]")
     parser.add_argument("--jfpd_mode", choices=["jfpd", "fgpd", "pgfd"], default="jfpd", help="JFPD mode")
+    parser.add_argument("--pseudo_threshold", type=float, default=0.6, help="Pseudo-label confidence threshold")
 
     return parser.parse_args()
 
@@ -181,49 +163,6 @@ def build_source_prototypes(
         proto_feat[valid] = proto_feat[valid] / counts[valid].unsqueeze(1)
         proto_prob[valid] = proto_prob[valid] / counts[valid].unsqueeze(1)
     return proto_feat, proto_prob, valid
-
-
-def configure_cdtrans(args: argparse.Namespace):
-    cfg = cd_cfg.clone()
-    cfg.defrost()
-
-    cfg.MODEL.NAME = "transformer"
-    cfg.MODEL.DIST_TRAIN = False
-    cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    cfg.MODEL.DEVICE_ID = args.gpu_id
-    cfg.MODEL.Transformer_TYPE = args.transformer_type
-    cfg.MODEL.BLOCK_PATTERN = args.block_pattern
-    cfg.MODEL.TASK_TYPE = "classify_DA"
-    cfg.MODEL.UDA_STAGE = "UDA"
-    cfg.MODEL.PRETRAIN_CHOICE = args.pretrain_choice
-    cfg.MODEL.PRETRAIN_PATH = args.pretrained_path
-    cfg.MODEL.ID_LOSS_TYPE = "softmax"
-    cfg.MODEL.IF_LABELSMOOTH = "on" if args.label_smooth else "off"
-
-    cfg.INPUT.SIZE_TRAIN = [args.img_size, args.img_size]
-    cfg.INPUT.SIZE_TEST = [args.img_size, args.img_size]
-    cfg.INPUT.SIZE_CROP = [args.img_size, args.img_size]
-
-    cfg.DATALOADER.NUM_WORKERS = args.num_workers
-    cfg.DATALOADER.SAMPLER = "softmax"
-
-    cfg.SOLVER.OPTIMIZER_NAME = args.optimizer
-    cfg.SOLVER.BASE_LR = args.learning_rate
-    cfg.SOLVER.MOMENTUM = args.momentum
-    cfg.SOLVER.WEIGHT_DECAY = args.weight_decay
-    cfg.SOLVER.WEIGHT_DECAY_BIAS = args.weight_decay
-    cfg.SOLVER.WARMUP_EPOCHS = args.warmup_epochs
-    cfg.SOLVER.MAX_EPOCHS = args.max_epochs
-    cfg.SOLVER.IMS_PER_BATCH = args.train_batch_size
-    cfg.SOLVER.LOG_PERIOD = args.log_period
-    cfg.SOLVER.EVAL_PERIOD = args.eval_period
-    cfg.SOLVER.SEED = args.seed
-
-    cfg.TEST.IMS_PER_BATCH = args.eval_batch_size
-
-    cfg.OUTPUT_DIR = os.path.join(args.output_dir, args.dataset, args.name)
-    cfg.freeze()
-    return cfg
 
 
 def build_dataloaders(args: argparse.Namespace) -> Tuple[DataLoader, DataLoader, DataLoader]:
@@ -261,12 +200,39 @@ def build_dataloaders(args: argparse.Namespace) -> Tuple[DataLoader, DataLoader,
         num_workers=args.num_workers,
         pin_memory=True,
     )
+
     return source_loader, target_loader, test_loader
+
+
+def build_optimizer(args: argparse.Namespace, model: torch.nn.Module) -> torch.optim.Optimizer:
+    if args.optimizer == "SGD":
+        return torch.optim.SGD(
+            model.parameters(),
+            lr=args.learning_rate,
+            momentum=args.momentum,
+            weight_decay=args.weight_decay,
+            nesterov=False,
+        )
+    if args.optimizer == "Adam":
+        return torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    if args.optimizer == "AdamW":
+        return torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+
+    raise ValueError(f"Unsupported optimizer: {args.optimizer}")
+
+
+def build_scheduler(args: argparse.Namespace, optimizer: torch.optim.Optimizer, steps_per_epoch: int):
+    total_steps = max(1, args.max_epochs * steps_per_epoch)
+    warmup_steps = max(0, args.warmup_epochs * steps_per_epoch)
+
+    if args.decay_type == "linear":
+        return WarmupLinearSchedule(optimizer, warmup_steps=warmup_steps, t_total=total_steps)
+    return WarmupCosineSchedule(optimizer, warmup_steps=warmup_steps, t_total=total_steps)
 
 
 def evaluate(
     args: argparse.Namespace,
-    model: torch.nn.Module,
+    model: FFTATModel,
     test_loader: DataLoader,
     device: torch.device,
 ) -> Tuple[float, float, int, Optional[str]]:
@@ -281,21 +247,13 @@ def evaluate(
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
 
-            zeros = torch.zeros(y.size(0), dtype=torch.long, device=device)
-            logits_s, logits_t, logits_f = model(
-                x,
-                x,
-                cam_label=zeros,
-                view_label=zeros,
-                return_logits=True,
-                cls_embed_specific=False,
-            )
-            _ = logits_s, logits_f
+            logits = model.infer(x)
+            batch_loss = F.cross_entropy(logits, y)
+            preds = torch.argmax(logits, dim=1)
 
-            batch_loss = F.cross_entropy(logits_t, y)
-            preds = torch.argmax(logits_t, dim=1)
             all_preds.append(preds.cpu().numpy())
             all_labels.append(y.cpu().numpy())
+
             batch_size = y.size(0)
             total_loss += float(batch_loss.item()) * batch_size
             total_samples += batch_size
@@ -333,128 +291,171 @@ def save_checkpoint(
     return ckpt_path
 
 
+def grl_coeff(step: int, total_steps: int, high: float = 1.0, low: float = 0.0, alpha: float = 10.0) -> float:
+    progress = float(step) / float(max(1, total_steps))
+    return float(2.0 * (high - low) / (1.0 + math.exp(-alpha * progress)) - (high - low) + low)
+
+
 def train(
     args: argparse.Namespace,
-    cfg,
-    model: torch.nn.Module,
-    loss_func,
+    model: FFTATModel,
     optimizer: torch.optim.Optimizer,
     scheduler,
     source_loader: DataLoader,
     target_loader: DataLoader,
     test_loader: DataLoader,
     device: torch.device,
+    output_dir: str,
 ) -> None:
-    scaler = torch.amp.GradScaler(device.type, enabled=(args.amp and device.type == "cuda"))
-    best_acc = -1.0
+    amp_enabled = bool(args.amp and device.type == "cuda")
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+
+    ce_loss = torch.nn.CrossEntropyLoss()
+    bce_loss = torch.nn.BCEWithLogitsLoss()
 
     steps_per_epoch = min(len(source_loader), len(target_loader))
     if steps_per_epoch <= 0:
         raise RuntimeError("Empty source/target loader detected.")
 
-    logger.info("Start training: epochs=%d, steps_per_epoch=%d", args.max_epochs, steps_per_epoch)
+    total_steps = args.max_epochs * steps_per_epoch
+    best_acc = -1.0
+    global_step = 0
+
+    logger.info(
+        "Start training: epochs=%d, steps_per_epoch=%d, total_steps=%d",
+        args.max_epochs,
+        steps_per_epoch,
+        total_steps,
+    )
 
     for epoch in range(1, args.max_epochs + 1):
         model.train()
-        scheduler.step(epoch)
         meters = TrainMeters()
 
         source_iter = iter(source_loader)
         target_iter = iter(target_loader)
 
         for n_iter in range(1, steps_per_epoch + 1):
+            global_step += 1
+            lambda_grl = grl_coeff(global_step, total_steps)
+
             x_s, y_s = next(source_iter)
             x_t, _, _ = next(target_iter)
 
             x_s = x_s.to(device, non_blocking=True)
             y_s = y_s.to(device, non_blocking=True)
             x_t = x_t.to(device, non_blocking=True)
-            cam = torch.zeros(y_s.size(0), dtype=torch.long, device=device)
-            view = torch.zeros(y_s.size(0), dtype=torch.long, device=device)
 
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.amp.autocast(device_type=device.type, enabled=scaler.is_enabled()):
-                (score_s, feat_s, _), (score_t, feat_t, _), _, _ = model(
-                    x_s,
-                    x_t,
-                    y_s,
-                    cam_label=cam,
-                    view_label=view,
+            with torch.amp.autocast("cuda", enabled=amp_enabled):
+                outputs = model(x_s, x_t, grl_lambda=lambda_grl)
+
+                logits_s = outputs["logits_s"]
+                logits_t = outputs["logits_t"]
+                feat_s = outputs["feat_s"]
+                feat_t = outputs["feat_t"]
+
+                loss_clc = ce_loss(logits_s, y_s)
+
+                domain_logits = outputs["domain_logits"]
+                batch_size = x_s.size(0)
+                domain_labels = torch.cat(
+                    [
+                        torch.ones(batch_size, 1, device=device),
+                        torch.zeros(batch_size, 1, device=device),
+                    ],
+                    dim=0,
                 )
+                loss_dis = bce_loss(domain_logits, domain_labels)
 
-                loss_src = loss_func(score_s, feat_s, y_s, cam)
+                patch_logits_s = outputs["patch_logits_s"].reshape(-1, 1)
+                patch_logits_t = outputs["patch_logits_t"].reshape(-1, 1)
+                patch_labels = torch.cat(
+                    [
+                        torch.ones_like(patch_logits_s),
+                        torch.zeros_like(patch_logits_t),
+                    ],
+                    dim=0,
+                )
+                loss_pat = bce_loss(torch.cat([patch_logits_s, patch_logits_t], dim=0), patch_labels)
 
-                with torch.no_grad():
-                    target_prob_detach = torch.softmax(score_t, dim=1)
-                    pseudo_conf, pseudo_label = target_prob_detach.max(dim=1)
-                    pseudo_mask = pseudo_conf >= args.pseudo_threshold
-
-                if pseudo_mask.any():
-                    loss_tgt = loss_func(score_t[pseudo_mask], feat_t[pseudo_mask], pseudo_label[pseudo_mask], cam[pseudo_mask])
+                if args.lambda_sc > 0.0:
+                    loss_sc = information_maximization_loss(logits_t)
                 else:
-                    loss_tgt = torch.zeros((), device=device)
-
-                total_loss = loss_src + args.target_loss_weight * loss_tgt
+                    loss_sc = torch.zeros((), device=device)
 
                 loss_jfpd = torch.zeros((), device=device)
-                if args.use_jfpd:
-                    source_feat = feat_s.detach()
-                    source_prob = torch.softmax(score_s.detach(), dim=-1)
-                    target_feat = feat_t
-                    target_prob = torch.softmax(score_t, dim=-1)
+                if args.use_jfpd and args.jfpd_lambda > 0.0:
+                    with torch.no_grad():
+                        source_prob = torch.softmax(logits_s.detach(), dim=-1)
+                        target_prob_detach = torch.softmax(logits_t.detach(), dim=-1)
+                        pseudo_conf, pseudo_label = target_prob_detach.max(dim=1)
+                        pseudo_mask = pseudo_conf >= args.pseudo_threshold
 
-                    proto_feat, proto_prob, valid_source = build_source_prototypes(
-                        source_feat=source_feat,
-                        source_prob=source_prob,
-                        source_label=y_s,
-                        num_classes=args.num_classes,
-                    )
+                        proto_feat, proto_prob, valid_source = build_source_prototypes(
+                            source_feat=feat_s.detach(),
+                            source_prob=source_prob,
+                            source_label=y_s,
+                            num_classes=args.num_classes,
+                        )
 
-                    pseudo = torch.argmax(target_prob, dim=-1)
-                    valid_target = valid_source[pseudo] & pseudo_mask
+                    target_prob = torch.softmax(logits_t, dim=-1)
+                    valid_target = valid_source[pseudo_label] & pseudo_mask
+
                     if valid_target.any():
-                        zs = proto_feat[pseudo[valid_target]]
-                        ps = proto_prob[pseudo[valid_target]]
+                        zs = proto_feat[pseudo_label[valid_target]]
+                        ps = proto_prob[pseudo_label[valid_target]]
                         loss_jfpd, _ = jfpd_loss(
-                            ft=target_feat[valid_target],
+                            ft=feat_t[valid_target],
                             pt=target_prob[valid_target],
                             zs=zs,
                             ps=ps,
                             alpha=args.jfpd_alpha,
                             mode=args.jfpd_mode,
                         )
-                        total_loss = total_loss + args.jfpd_lambda * loss_jfpd
+
+                total_loss = loss_clc
+                total_loss = total_loss + args.lambda_dis * loss_dis
+                total_loss = total_loss + args.lambda_pat * loss_pat
+                total_loss = total_loss + args.lambda_sc * loss_sc
+                if args.use_jfpd and args.jfpd_lambda > 0.0:
+                    total_loss = total_loss + args.jfpd_lambda * loss_jfpd
 
             scaler.scale(total_loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             scaler.step(optimizer)
             scaler.update()
+            scheduler.step()
 
             with torch.no_grad():
-                acc_src = (score_s.max(1)[1] == y_s).float().mean()
+                acc_src = (torch.argmax(logits_s, dim=1) == y_s).float().mean()
 
-            meters.update(total_loss, loss_src, loss_tgt, loss_jfpd, acc_src)
+            meters.update(total_loss, loss_clc, loss_dis, loss_pat, loss_sc, loss_jfpd, acc_src)
 
-            if n_iter % cfg.SOLVER.LOG_PERIOD == 0:
+            if n_iter % args.log_period == 0:
                 avg = meters.avg()
                 current_lr = optimizer.param_groups[0]["lr"]
                 logger.info(
-                    "Epoch[%d/%d] Iter[%d/%d] loss=%.4f src=%.4f tgt=%.4f jfpd=%.4f acc=%.4f lr=%.6f",
+                    "Epoch[%d/%d] Iter[%d/%d] "
+                    "loss=%.4f clc=%.4f dis=%.4f pat=%.4f sc=%.4f jfpd=%.4f acc=%.4f lr=%.6f grl=%.4f",
                     epoch,
                     args.max_epochs,
                     n_iter,
                     steps_per_epoch,
                     avg["loss"],
-                    avg["loss_src"],
-                    avg["loss_tgt"],
+                    avg["loss_clc"],
+                    avg["loss_dis"],
+                    avg["loss_pat"],
+                    avg["loss_sc"],
                     avg["loss_jfpd"],
                     avg["acc_src"],
                     current_lr,
+                    lambda_grl,
                 )
 
-        if epoch % cfg.SOLVER.EVAL_PERIOD == 0:
+        if epoch % args.eval_period == 0:
             acc, val_loss, val_samples, classwise = evaluate(args, model, test_loader, device)
             if classwise is None:
                 logger.info(
@@ -476,7 +477,7 @@ def train(
 
             if acc > best_acc:
                 best_acc = acc
-                ckpt = save_checkpoint(model, optimizer, scheduler, cfg.OUTPUT_DIR, epoch, best_acc)
+                ckpt = save_checkpoint(model, optimizer, scheduler, output_dir, epoch, best_acc)
                 logger.info("Best checkpoint updated: %s (acc=%.2f)", ckpt, best_acc)
 
     logger.info("Training finished. Best accuracy: %.2f", best_acc)
@@ -489,10 +490,6 @@ def main() -> None:
         raise ValueError("--jfpd_alpha must be in [0, 1].")
     if args.pseudo_threshold < 0.0 or args.pseudo_threshold > 1.0:
         raise ValueError("--pseudo_threshold must be in [0, 1].")
-    if args.pretrain_choice in {"imagenet", "un_pretrain"} and not args.pretrained_path:
-        raise ValueError("--pretrained_path is required when --pretrain_choice is not 'pretrain'.")
-    if args.pretrain_choice == "timm" and not args.timm_model:
-        raise ValueError("--timm_model is required when --pretrain_choice is 'timm'.")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -503,42 +500,43 @@ def main() -> None:
         datefmt="%m/%d/%Y %H:%M:%S",
     )
 
-    cfg = configure_cdtrans(args)
-    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+    output_dir = os.path.join(args.output_dir, args.dataset, args.name)
+    os.makedirs(output_dir, exist_ok=True)
 
     set_seed(args.seed)
     logger.info("Run name: %s", args.name)
-    logger.info("Output dir: %s", cfg.OUTPUT_DIR)
+    logger.info("Output dir: %s", output_dir)
     logger.info("Using device: %s", device)
+    logger.info("timm model: %s (pretrained=%s)", args.timm_model, str(not args.no_timm_pretrained))
 
     source_loader, target_loader, test_loader = build_dataloaders(args)
+    steps_per_epoch = min(len(source_loader), len(target_loader))
+    if steps_per_epoch <= 0:
+        raise RuntimeError("Source/target DataLoader is empty. Check dataset list files.")
 
-    camera_num = 0
-    view_num = 0
-    model = make_model(
-        cfg,
-        num_class=args.num_classes,
-        camera_num=camera_num,
-        view_num=view_num,
-        timm_model=args.timm_model,
+    model = FFTATModel(
+        timm_model_name=args.timm_model,
+        num_classes=args.num_classes,
+        img_size=args.img_size,
+        pretrained=not args.no_timm_pretrained,
+        split_layer=args.split_layer,
+        tg_layers=args.tg_layers,
     )
     model.to(device)
 
-    loss_func, center_criterion = make_loss(cfg, num_classes=args.num_classes)
-    optimizer, _ = make_optimizer(cfg, model, center_criterion)
-    scheduler = create_scheduler(cfg, optimizer)
+    optimizer = build_optimizer(args, model)
+    scheduler = build_scheduler(args, optimizer, steps_per_epoch)
 
     train(
         args=args,
-        cfg=cfg,
         model=model,
-        loss_func=loss_func,
         optimizer=optimizer,
         scheduler=scheduler,
         source_loader=source_loader,
         target_loader=target_loader,
         test_loader=test_loader,
         device=device,
+        output_dir=output_dir,
     )
 
 
