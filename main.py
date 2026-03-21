@@ -99,7 +99,7 @@ def parse_args() -> argparse.Namespace:
         help="timm image encoder model name",
     )
     parser.add_argument("--no_timm_pretrained", action="store_true", help="Disable timm pretrained weights")
-    parser.add_argument("--split_layer", type=int, default=6, help="Backbone layer index for FFTAT fusion/graph")
+    parser.add_argument("--split_layer", type=int, default=10, help="Backbone layer index for FFTAT fusion/graph")
     parser.add_argument("--tg_layers", type=int, default=1, help="Number of TG-guided blocks")
 
     parser.add_argument("--img_size", type=int, default=256, help="Input image size")
