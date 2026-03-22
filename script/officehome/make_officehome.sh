@@ -18,8 +18,7 @@ LEARNING_RATE=0.06
 GPU_ID=0
 WARMUP_STEPS=1000
 OPTIMAL=1
-LOG_PERIOD=50
-EVAL_PERIOD=25
+EVAL_EVERY=25
 EVAL_BATCH_SIZE=32
 
 
@@ -61,9 +60,7 @@ for TASK in "${TASKS[@]}"; do
   CMD+=" --eval_batch_size ${EVAL_BATCH_SIZE}"
   CMD+=" --num_steps ${NUM_STEPS}"
   CMD+=" --warmup_steps ${WARMUP_STEPS}"
-  CMD+=" --log_period ${LOG_PERIOD}"
-  CMD+=" --eval_period ${EVAL_PERIOD}"
-  CMD+=" --optimizer SGD"
+  CMD+=" --eval_every ${EVAL_EVERY}"
   CMD+=" --learning_rate ${LEARNING_RATE}"
   CMD+=" --gpu_id 0"
   CMD+=" --model_type ${MODEL_TYPE}"
