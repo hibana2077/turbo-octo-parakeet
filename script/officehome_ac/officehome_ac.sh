@@ -4,9 +4,9 @@
 #PBS -l ngpus=1
 #PBS -l ncpus=12
 #PBS -l mem=32GB
-#PBS -l walltime=00:30:00
+#PBS -l walltime=00:40:00
 #PBS -l wd
-#PBS -l storage=scratch/cp23+gdata/yp87
+#PBS -l storage=scratch/cp23
 #PBS -r y
 
 module load cuda/12.6.2
