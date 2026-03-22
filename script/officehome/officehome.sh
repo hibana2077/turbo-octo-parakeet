@@ -3,8 +3,8 @@
 #PBS -q gpuhopper
 #PBS -l ngpus=1
 #PBS -l ncpus=12
-#PBS -l mem=8GB
-#PBS -l walltime=02:25:00
+#PBS -l mem=16GB
+#PBS -l walltime=02:55:00
 #PBS -l wd
 #PBS -l storage=scratch/cp23+gdata/yp87
 #PBS -r y
@@ -17,8 +17,8 @@ export HF_HOME="/scratch/cp23/lw4988/hf_home"
 export HF_HUB_OFFLINE=1
 
 TAG="officehome_jfpd_sweep"
-SCRIPT_DIR="./"
-PROJECT_ROOT="../../"
+SCRIPT_DIR="."
+PROJECT_ROOT="../.."
 EXP_FILE="${SCRIPT_DIR}/officehome.txt"
 
 IDX="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}"
@@ -38,9 +38,10 @@ if [[ "$RUN_NAME" == "$LINE" || -z "${COMMAND:-}" ]]; then
   exit 1
 fi
 
-LOG_DIR="./logs"
+LOG_DIR="${SCRIPT_DIR}/logs"
 cd "$PROJECT_ROOT"
 mkdir -p "$LOG_DIR"
+source .venv/bin/activate
 
 LOG_PATH="${LOG_DIR}/${TAG}_${IDX}_${RUN_NAME}.log"
 
