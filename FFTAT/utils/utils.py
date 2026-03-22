@@ -3,14 +3,10 @@ import numpy as np
 from sklearn.metrics import confusion_matrix
 import networkx as nx
 import copy
+import cpnet
 import random
 from itertools import combinations, groupby
 import matplotlib.pyplot as plt
-
-try:
-    import cpnet
-except ImportError:
-    cpnet = None
 
 def mix_img(x_s, x_t, x_s_mask, x_t_mask, patches_in_cores, influenceRatio):
     x_s_clone = x_s.clone()
@@ -218,8 +214,6 @@ def visda_acc(predict, all_label):
     return aacc, acc
 
 def GraphConnectedCheck(adj):
-    if cpnet is None:
-        raise ImportError("cpnet is required for GraphConnectedCheck. Install it with `pip install cpnet`.")
     algorithm = cpnet.BE()
     batchsize, num_patches,num_patches = adj.shape
     cp_graph_cnt = 0
