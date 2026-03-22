@@ -92,31 +92,19 @@ def save_model(args, model, prefix_saved_mode, is_adv=False, ):
         model_checkpoint = os.path.join(args.output_dir, args.dataset, prefix_saved_mode+args.name+"_checkpoint"+"_"+".bin")
     torch.save(model_to_save.state_dict(), model_checkpoint)
     logger.info("Saved model checkpoint to [DIR: %s]", os.path.join(args.output_dir, args.dataset))
+    return model_checkpoint
 
 def setup(args, prefix_saved_mode):
     # Prepare model
     config = CONFIGS[args.model_type]
     model = VisionTransformer(config, args.img_size, zero_head=True, 
                               num_classes=args.num_classes, msa_layer=args.msa_layer)
-    
-    best_acc = 0
-    best_model = None
+
     if(not os.path.exists('./output/'+args.dataset)):
         os.makedirs('./output/'+args.dataset)
-    #print('prefix_saved_mode ',prefix_saved_mode)
-    for file in os.listdir('./output/'+args.dataset):
-        #print('file', file)
-        if(prefix_saved_mode in file and 'checkpoint' in file ):
-            #print('file', file)
-            if(best_acc > float(file.split('_')[4] ) ):
-                os.remove('./output/'+args.dataset+'/'+file)
 
-    if(best_model is not None):
-        model_checkpoint = os.path.join(args.output_dir, args.dataset, best_model)
-        model.load_state_dict(torch.load(model_checkpoint))
-    else:
-        print('pretrained model:', args.pretrained_dir)
-        model.load_from(np.load(args.pretrained_dir))
+    print('pretrained model:', args.pretrained_dir)
+    model.load_from(np.load(args.pretrained_dir))
     num_params = count_parameters(model)
 
     logger.info("{}".format(config))
@@ -258,6 +246,7 @@ def valid(args, model, writer, test_loader, global_step, cp_mask, ad_net, prefix
 
 def train(args, model,cp_mask, prefix_saved_mode):
     best_acc = 0
+    best_checkpoint_files = []
 
     if args.local_rank in [-1, 0]:
         os.makedirs(os.path.join(args.output_dir, args.dataset), exist_ok=True)
@@ -341,9 +330,8 @@ def train(args, model,cp_mask, prefix_saved_mode):
         logits_s, logits_t, loss_ad_local, loss_rec, x_s, x_t, temp_mask = model(x_s = x_s, x_t = x_t, ad_net = ad_net_local, cp_mask=cp_mask, \
             optimal_flag = args.optimal, )
         cp_mask = temp_mask
-        if not args.no_save_cp:
-            plt.imsave('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.jpeg',cp_mask[1:,1:].to('cpu'), cmap='rainbow' )  
-            np.savetxt('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.csv', np.array(cp_mask[1:,1:].to('cpu')) )
+        plt.imsave('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.jpeg',cp_mask[1:,1:].to('cpu'), cmap='rainbow' )  
+        np.savetxt('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.csv', np.array(cp_mask[1:,1:].to('cpu')) )
 
         loss_fct = CrossEntropyLoss()
         loss_clc = loss_fct(logits_s.view(-1, args.num_classes), y_s.view(-1))
@@ -424,14 +412,16 @@ def train(args, model,cp_mask, prefix_saved_mode):
         if global_step % args.eval_every == 0 and args.local_rank in [-1, 0]:
             accuracy, classWise_acc = valid(args, model, writer, test_loader, global_step, cp_mask, ad_net_local, prefix_saved_mode)
             if best_acc < accuracy:
+                prev_best_checkpoint_files = best_checkpoint_files[:]
                 best_acc = accuracy
 
-                save_model(args, model, prefix_saved_mode +str(best_acc) +'_',  is_adv=False, )
-                save_model(args, ad_net_local, prefix_saved_mode +str(best_acc) +'_', is_adv=True, )
-                for file in os.listdir('./output/'+args.dataset):
-                    if(prefix_saved_mode in file and 'checkpoint' in file ):
-                        if(best_acc > float(file.split('_')[4] ) ):
-                            os.remove('./output/'+args.dataset+'/'+file)
+                best_checkpoint_files = [
+                    save_model(args, model, prefix_saved_mode + str(best_acc) + '_', is_adv=False),
+                    save_model(args, ad_net_local, prefix_saved_mode + str(best_acc) + '_', is_adv=True),
+                ]
+                for old_checkpoint in prev_best_checkpoint_files:
+                    if old_checkpoint not in best_checkpoint_files and os.path.exists(old_checkpoint):
+                        os.remove(old_checkpoint)
 
                 if classWise_acc is not None:
                     best_classWise_acc = classWise_acc
@@ -451,8 +441,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_cp", default=False, action="store_true",
                         help="Use Core periphery constraint.")
-    parser.add_argument("--no_save_cp", default=False, action="store_true",
-                        help="Do not save CP mask files during training.")
 
     parser.add_argument("--name", default = 'qs', type=str, 
                         help="Name of this run. Used for monitoring.")

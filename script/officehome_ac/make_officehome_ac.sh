@@ -24,7 +24,7 @@ GPU_ID=0
 WARMUP_STEPS=1000
 OPTIMAL=1
 
-JFPD_LAMBDA_VALUES=(1.0 0.1 0.01 0.001)
+JFPD_LAMBDA_VALUES=(1.0 0.01 0.0001)
 JFPD_ALPHA_VALUES=(0.5)
 BASE_NAME="ac_jfpd"
 
@@ -61,7 +61,7 @@ for TRAIN_BATCH_SIZE in "${TRAIN_BATCH_SIZE_VALUES[@]}"; do
       CMD+=" --theta ${THETA}"
       CMD+=" --learning_rate ${LEARNING_RATE}"
       CMD+=" --gpu_id ${GPU_ID}"
-      CMD+=" --use_cp --no_save_cp"
+      CMD+=" --use_cp"
       CMD+=" --optimal ${OPTIMAL}"
       CMD+=" --warmup_steps ${WARMUP_STEPS}"
       CMD+=" --use_jfpd"
