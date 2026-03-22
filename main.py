@@ -29,6 +29,7 @@ from utils.utils import visda_acc, get_mask, re_org_img, mix_img
 from torchvision import transforms, datasets
 from data.data_list_image import ImageList, ImageListIndex, rgb_loader
 from models import lossZoo
+from jfpd import jfpd_loss
 import networkx as nx
 from models.TVTmodeling import TVTVisionTransformer, TVTAdversarialNetwork
 import cv2
@@ -302,10 +303,44 @@ def train(args, model,cp_mask, prefix_saved_mode):
         
         loss_im = lossZoo.im(logits_t.view(-1, args.num_classes))
         loss_ad_global = lossZoo.adv(torch.cat((x_s[:,0], x_t[:,0]), 0), ad_net)
+        loss_jfpd = logits_s.new_zeros(())
+        jfpd_stats = None
+        jfpd_mask_ratio = 1.0
+
+        if args.use_jfpd:
+            prob_s = torch.softmax(logits_s.view(-1, args.num_classes), dim=1)
+            prob_t = torch.softmax(logits_t.view(-1, args.num_classes), dim=1)
+            feat_s = x_s[:, 0]
+            feat_t = x_t[:, 0]
+
+            if args.pseudo_threshold > 0.0:
+                conf_mask = prob_t.max(dim=1).values >= args.pseudo_threshold
+                jfpd_mask_ratio = conf_mask.float().mean().item()
+                if conf_mask.any():
+                    loss_jfpd, jfpd_stats = jfpd_loss(
+                        ft=feat_t[conf_mask],
+                        pt=prob_t[conf_mask],
+                        zs=feat_s[conf_mask],
+                        ps=prob_s[conf_mask],
+                        alpha=args.jfpd_alpha,
+                        mode=args.jfpd_mode,
+                    )
+            else:
+                loss_jfpd, jfpd_stats = jfpd_loss(
+                    ft=feat_t,
+                    pt=prob_t,
+                    zs=feat_s,
+                    ps=prob_s,
+                    alpha=args.jfpd_alpha,
+                    mode=args.jfpd_mode,
+                )
+
         loss = loss_clc + args.beta * loss_ad_global + args.gamma * loss_ad_local
 
         if args.use_im:
             loss += (args.theta * loss_im)
+        if args.use_jfpd:
+            loss += (args.jfpd_lambda * loss_jfpd)
         #print('loss_clc {}, loss_im {}, loss_ad_global {}, loss_ad_local {}'.format(loss_clc.detach(), loss_im.detach(), loss_ad_global.detach(), loss_ad_local.detach()))
             
         loss.backward()
@@ -329,6 +364,14 @@ def train(args, model,cp_mask, prefix_saved_mode):
             writer.add_scalar("train/loss_ad_local", scalar_value=loss_ad_local.item(), global_step=global_step)
             writer.add_scalar("train/loss_rec", scalar_value=loss_rec.item(), global_step=global_step)
             writer.add_scalar("train/loss_im", scalar_value=loss_im.item(), global_step=global_step)
+            if args.use_jfpd:
+                writer.add_scalar("train/loss_jfpd", scalar_value=loss_jfpd.item(), global_step=global_step)
+                writer.add_scalar("train/jfpd_mask_ratio", scalar_value=jfpd_mask_ratio, global_step=global_step)
+                if jfpd_stats is not None:
+                    writer.add_scalar("train/jfpd_d_feat", scalar_value=jfpd_stats["d_feat"], global_step=global_step)
+                    writer.add_scalar("train/jfpd_d_pred", scalar_value=jfpd_stats["d_pred"], global_step=global_step)
+                    writer.add_scalar("train/jfpd_psi", scalar_value=jfpd_stats["psi"], global_step=global_step)
+                    writer.add_scalar("train/jfpd_phi", scalar_value=jfpd_stats["phi"], global_step=global_step)
             writer.add_scalar("train/lr", scalar_value=scheduler.get_last_lr()[0], global_step=global_step)
         
         if global_step % args.eval_every == 0 and args.local_rank in [-1, 0]:
@@ -397,6 +440,16 @@ def main():
                         help="The importance of the IM loss.")
     parser.add_argument("--use_im", default=False, action="store_true",
                         help="Use information maximization loss.")
+    parser.add_argument("--use_jfpd", default=False, action="store_true",
+                        help="Use JFPD regularization loss.")
+    parser.add_argument("--jfpd_lambda", default=0.1, type=float,
+                        help="The importance of the JFPD loss.")
+    parser.add_argument("--jfpd_alpha", default=0.5, type=float,
+                        help="Alpha value in JFPD loss.")
+    parser.add_argument("--jfpd_mode", choices=["jfpd", "fgpd", "pgfd"], default="jfpd",
+                        help="Loss mode used in JFPD.")
+    parser.add_argument("--pseudo_threshold", default=0.0, type=float,
+                        help="Target confidence threshold for JFPD; set 0 to disable filtering.")
     parser.add_argument("--msa_layer", default=12, type=int,
                         help="The layer that incorporates local alignment.")
     parser.add_argument("--is_test", default=False, action="store_true",

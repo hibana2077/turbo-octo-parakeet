@@ -214,3 +214,4 @@ data/office/images/
 logs/
 output/
 checkpoints/imagenet21k_ViT-B_16.npz
+checkpoint/imagenet21k_ViT-B_16.npz
