@@ -60,7 +60,7 @@ for JFPD_LAMBDA in "${JFPD_LAMBDA_VALUES[@]}"; do
     CMD+=" --theta ${THETA}"
     CMD+=" --learning_rate ${LEARNING_RATE}"
     CMD+=" --gpu_id ${GPU_ID}"
-    CMD+=" --use_cp"
+    CMD+=" --use_cp --no_save_cp"
     CMD+=" --optimal ${OPTIMAL}"
     CMD+=" --warmup_steps ${WARMUP_STEPS}"
     CMD+=" --use_jfpd"
