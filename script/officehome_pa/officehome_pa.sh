@@ -16,10 +16,10 @@ set -euo pipefail
 export HF_HOME="/scratch/cp23/lw4988/hf_home"
 export HF_HUB_OFFLINE=1
 
-TAG="offcehome_pa_jfpd_sweep"
+TAG="officehome_pa_jfpd_sweep"
 SCRIPT_DIR="."
 PROJECT_ROOT="../.."
-EXP_FILE="${SCRIPT_DIR}/offcehome_pa.txt"
+EXP_FILE="${SCRIPT_DIR}/officehome_pa.txt"
 
 IDX="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}"
 LINE_NO=$((IDX + 1))

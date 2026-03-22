@@ -2,13 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXP_FILE="${SCRIPT_DIR}/offcehome_pa.txt"
-SCRIPT_NAME="${SCRIPT_DIR}/offcehome_pa.sh"
+EXP_FILE="${SCRIPT_DIR}/officehome_pa.txt"
+SCRIPT_NAME="${SCRIPT_DIR}/officehome_pa.sh"
 MAX_JOBS="${MAX_JOBS:-10}"
 
 if [[ ! -f "$EXP_FILE" ]]; then
   echo "Missing ${EXP_FILE}; generating it now..."
-  "${SCRIPT_DIR}/make_offcehome_pa.sh"
+  "${SCRIPT_DIR}/make_officehome_pa.sh"
 fi
 
 NUM_JOBS=$(awk 'NF && $1 !~ /^#/ {count++} END {print count+0}' "$EXP_FILE")

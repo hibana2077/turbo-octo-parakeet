@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_FILE="${SCRIPT_DIR}/offcehome_pa.txt"
+OUT_FILE="${SCRIPT_DIR}/officehome_pa.txt"
 
 TRAIN_BATCH_SIZE_VALUES=(64 32 24)
 EVAL_BATCH_SIZE=16
