@@ -103,9 +103,6 @@ for BASELINE_LINE in "${BASELINE_LINES[@]}"; do
     CMD+=" --use_im"
   fi
   CMD+=" --theta ${THETA}"
-  if [[ -n "$PERTURBATION_RATIO" ]]; then
-    CMD+=" --perturbationRatio ${PERTURBATION_RATIO}"
-  fi
   if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_cp([[:space:]]|$) ]]; then
     CMD+=" --use_cp"
   fi
