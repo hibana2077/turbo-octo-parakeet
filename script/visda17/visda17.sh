@@ -41,6 +41,7 @@ fi
 LOG_DIR="./logs"
 cd "$PROJECT_ROOT"
 mkdir -p "$LOG_DIR"
+source .venv/bin/activate
 
 LOG_PATH="${LOG_DIR}/${TAG}_${IDX}_${RUN_NAME}.log"
 
