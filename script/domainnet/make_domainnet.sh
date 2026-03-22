@@ -12,7 +12,7 @@ JFPD_ALPHA=0.5
 JFPD_MODE="jfpd"
 
 # Overrides requested by us
-TRAIN_BATCH_SIZE=64
+TRAIN_BATCH_SIZE=60
 NUM_STEPS=2000
 GPU_ID=0
 
