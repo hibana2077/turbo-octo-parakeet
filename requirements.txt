@@ -74,4 +74,3 @@ datasets
 
 yacs
 cpnet
-numpy
