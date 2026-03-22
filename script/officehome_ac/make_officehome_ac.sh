@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_FILE="${SCRIPT_DIR}/officehome_ac.txt"
+SCRIPT_DIR="."
+OUT_FILE="./officehome_ac.txt"
 
 # Baseline from user-provided FFTAT command (office-home Art -> Clipart).
 TRAIN_BATCH_SIZE=16
