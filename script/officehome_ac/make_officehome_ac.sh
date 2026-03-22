@@ -5,7 +5,7 @@ SCRIPT_DIR="."
 OUT_FILE="./officehome_ac.txt"
 
 # Baseline from user-provided FFTAT command (office-home Art -> Clipart).
-TRAIN_BATCH_SIZE_VALUES=(32 48 64 128)
+TRAIN_BATCH_SIZE_VALUES=(64)
 EVAL_BATCH_SIZE=16
 DATASET="office-home"
 SOURCE_LIST="data/office-home/Art.txt"
@@ -24,7 +24,7 @@ GPU_ID=0
 WARMUP_STEPS=1000
 OPTIMAL=1
 
-JFPD_LAMBDA_VALUES=(1.0 0.01 0.0001)
+JFPD_LAMBDA_VALUES=(0.01 0.001 0.0001 0.00001 0.000001 0.0000001 0.00000001)
 JFPD_ALPHA_VALUES=(0.5)
 BASE_NAME="ac_jfpd"
 
