@@ -14,7 +14,6 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from torch.nn import CrossEntropyLoss
-from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 #from apex import amp
 #from apex.parallel import DistributedDataParallel as DDP
@@ -151,26 +150,68 @@ def valid(args, model, writer, test_loader, global_step, cp_mask, ad_net, prefix
     model.eval()
     ad_net.eval()
     all_preds, all_label = [], []
-    epoch_iterator = tqdm(test_loader,
-                          desc="Validating... (loss=X.X)",
-                          bar_format="{l_bar}{r_bar}",
-                          dynamic_ncols=True,
-                          disable=args.local_rank not in [-1, 0])
     loss_fct = torch.nn.CrossEntropyLoss()
     valid_cp = 0 
-    for step, batch in enumerate(epoch_iterator):
+    jfpd_loss_sum = 0.0
+    jfpd_feat_comp_sum = 0.0
+    jfpd_pred_comp_sum = 0.0
+    jfpd_count = 0
+    for step, batch in enumerate(test_loader):
         batch = tuple(t.to(args.device) for t in batch)
         x, y = batch
 
         with torch.no_grad():
-            logits, _, _, temp_cp = model(x_s = x, ad_net=ad_net, cp_mask=cp_mask, \
-                 optimal_flag = args.optimal, )
+            if args.use_jfpd:
+                logits, logits_t, _, _, feat_s, feat_t, temp_cp = model(
+                    x_s=x, x_t=x, ad_net=ad_net, cp_mask=cp_mask, optimal_flag=args.optimal,
+                )
+            else:
+                logits, _, _, temp_cp = model(
+                    x_s=x, ad_net=ad_net, cp_mask=cp_mask, optimal_flag=args.optimal,
+                )
             valid_cp = valid_cp + temp_cp.detach()
 
             eval_loss = loss_fct(logits, y)
             eval_losses.update(eval_loss.item())
 
             preds = torch.argmax(logits, dim=-1)
+
+            if args.use_jfpd:
+                prob_s = torch.softmax(logits.view(-1, args.num_classes), dim=1)
+                prob_t = torch.softmax(logits_t.view(-1, args.num_classes), dim=1)
+                cls_feat_s = feat_s[:, 0]
+                cls_feat_t = feat_t[:, 0]
+
+                batch_count = cls_feat_t.size(0)
+                loss_jfpd = logits.new_zeros(())
+                jfpd_stats = None
+                if args.pseudo_threshold > 0.0:
+                    conf_mask = prob_t.max(dim=1).values >= args.pseudo_threshold
+                    batch_count = int(conf_mask.sum().item())
+                    if conf_mask.any():
+                        loss_jfpd, jfpd_stats = jfpd_loss(
+                            ft=cls_feat_t[conf_mask],
+                            pt=prob_t[conf_mask],
+                            zs=cls_feat_s[conf_mask],
+                            ps=prob_s[conf_mask],
+                            alpha=args.jfpd_alpha,
+                            mode=args.jfpd_mode,
+                        )
+                else:
+                    loss_jfpd, jfpd_stats = jfpd_loss(
+                        ft=cls_feat_t,
+                        pt=prob_t,
+                        zs=cls_feat_s,
+                        ps=prob_s,
+                        alpha=args.jfpd_alpha,
+                        mode=args.jfpd_mode,
+                    )
+
+                if jfpd_stats is not None and batch_count > 0:
+                    jfpd_loss_sum += loss_jfpd.item() * batch_count
+                    jfpd_feat_comp_sum += jfpd_stats["feat_comp"] * batch_count
+                    jfpd_pred_comp_sum += jfpd_stats["pred_comp"] * batch_count
+                    jfpd_count += batch_count
 
         if len(all_preds) == 0:
             all_preds.append(preds.detach().cpu().numpy())
@@ -182,7 +223,6 @@ def valid(args, model, writer, test_loader, global_step, cp_mask, ad_net, prefix
             all_label[0] = np.append(
                 all_label[0], y.detach().cpu().numpy(), axis=0
             )
-        epoch_iterator.set_description("Validating... (loss=%2.5f)" % eval_losses.val)
     
     #plt.imsave('./output/'+args.dataset+'/'+prefix_saved_mode+'valid_cp_mask.jpeg',valid_cp.to('cpu'), cmap='rainbow' )  
     #np.savetxt('./output/'+args.dataset+'/'+prefix_saved_mode+'valid_cp_mask.csv', np.array(valid_cp.to('cpu')) )
@@ -200,6 +240,16 @@ def valid(args, model, writer, test_loader, global_step, cp_mask, ad_net, prefix
     logger.info("Valid Accuracy: %2.5f" % accuracy)
 
     writer.add_scalar("test/accuracy", scalar_value=accuracy, global_step=global_step)
+    if args.use_jfpd and jfpd_count > 0:
+        val_jfpd_loss = jfpd_loss_sum / jfpd_count
+        val_jfpd_feat_comp = jfpd_feat_comp_sum / jfpd_count
+        val_jfpd_pred_comp = jfpd_pred_comp_sum / jfpd_count
+        logger.info("Valid JFPD Loss: %2.5f" % val_jfpd_loss)
+        logger.info("Valid JFPD Feature Component: %2.5f" % val_jfpd_feat_comp)
+        logger.info("Valid JFPD Prediction Component: %2.5f" % val_jfpd_pred_comp)
+        writer.add_scalar("test/loss_jfpd", scalar_value=val_jfpd_loss, global_step=global_step)
+        writer.add_scalar("test/jfpd_feat_comp", scalar_value=val_jfpd_feat_comp, global_step=global_step)
+        writer.add_scalar("test/jfpd_pred_comp", scalar_value=val_jfpd_pred_comp, global_step=global_step)
     if args.dataset == 'visda17':
         return accuracy, classWise_acc
     else:
@@ -208,10 +258,6 @@ def valid(args, model, writer, test_loader, global_step, cp_mask, ad_net, prefix
 
 def train(args, model,cp_mask, prefix_saved_mode):
     best_acc = 0
-    for file in os.listdir('./output/'+args.dataset):
-        if(prefix_saved_mode in file and 'checkpoint' in file ):
-            if(best_acc < float(file.split('_')[4] ) ):
-                best_acc = float(file.split('_')[4])
 
     if args.local_rank in [-1, 0]:
         os.makedirs(os.path.join(args.output_dir, args.dataset), exist_ok=True)
@@ -295,8 +341,9 @@ def train(args, model,cp_mask, prefix_saved_mode):
         logits_s, logits_t, loss_ad_local, loss_rec, x_s, x_t, temp_mask = model(x_s = x_s, x_t = x_t, ad_net = ad_net_local, cp_mask=cp_mask, \
             optimal_flag = args.optimal, )
         cp_mask = temp_mask
-        plt.imsave('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.jpeg',cp_mask[1:,1:].to('cpu'), cmap='rainbow' )  
-        np.savetxt('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.csv', np.array(cp_mask[1:,1:].to('cpu')) )
+        if not args.no_save_cp:
+            plt.imsave('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.jpeg',cp_mask[1:,1:].to('cpu'), cmap='rainbow' )  
+            np.savetxt('./output/'+args.dataset+'/'+prefix_saved_mode+'train_cp_mask.csv', np.array(cp_mask[1:,1:].to('cpu')) )
 
         loss_fct = CrossEntropyLoss()
         loss_clc = loss_fct(logits_s.view(-1, args.num_classes), y_s.view(-1))
@@ -404,6 +451,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_cp", default=False, action="store_true",
                         help="Use Core periphery constraint.")
+    parser.add_argument("--no_save_cp", default=False, action="store_true",
+                        help="Do not save CP mask files during training.")
 
     parser.add_argument("--name", default = 'qs', type=str, 
                         help="Name of this run. Used for monitoring.")

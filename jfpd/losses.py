@@ -58,12 +58,15 @@ def jfpd_loss(
     psi = 1.0 / (1.0 + hs + ht)
     phi = 1.0 / (1.0 + d_feat)
 
+    feat_comp = psi * d_feat
+    pred_comp = phi * d_pred
+
     if mode == "jfpd":
-        loss = alpha * psi * d_feat + (1.0 - alpha) * phi * d_pred
+        loss = alpha * feat_comp + (1.0 - alpha) * pred_comp
     elif mode == "pgfd":
-        loss = psi * d_feat
+        loss = feat_comp
     elif mode == "fgpd":
-        loss = phi * d_pred
+        loss = pred_comp
     else:
         raise ValueError(f"Unsupported loss mode '{mode}'. Expected one of: jfpd, fgpd, pgfd.")
 
@@ -72,5 +75,7 @@ def jfpd_loss(
         "d_pred": d_pred.mean().item(),
         "psi": psi.mean().item(),
         "phi": phi.mean().item(),
+        "feat_comp": feat_comp.mean().item(),
+        "pred_comp": pred_comp.mean().item(),
     }
     return loss.mean(), stats
