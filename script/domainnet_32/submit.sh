@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXP_FILE="${SCRIPT_DIR}/domainnet.txt"
-SCRIPT_NAME="${SCRIPT_DIR}/domainnet.sh"
+SCRIPT_NAME="${SCRIPT_DIR}/domainnet_32.sh"
 MAX_JOBS="${MAX_JOBS:-10}"
 
 if [[ ! -f "$EXP_FILE" ]]; then
