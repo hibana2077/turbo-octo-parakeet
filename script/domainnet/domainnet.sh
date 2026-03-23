@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -P cp23
-#PBS -q gpuhopper
+#PBS -q gpuvolta
 #PBS -l ngpus=1
 #PBS -l ncpus=12
 #PBS -l mem=18GB
