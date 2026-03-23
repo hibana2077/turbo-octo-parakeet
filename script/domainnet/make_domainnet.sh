@@ -7,12 +7,12 @@ OUT_FILE="${SCRIPT_DIR}/domainnet.txt"
 FFTAT_FILE="${PROJECT_ROOT}/fftat_script.txt"
 
 # JFPD best params (ours)
-JFPD_LAMBDA=0.001
+JFPD_LAMBDA=0.01
 JFPD_ALPHA=0.5
 JFPD_MODE="jfpd"
 
 # Overrides requested by us
-TRAIN_BATCH_SIZE=190
+TRAIN_BATCH_SIZE=45
 NUM_STEPS=6000
 GPU_ID=0
 
