@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="."
 EXP_FILE="${SCRIPT_DIR}/domainnet_cr.txt"
 SCRIPT_NAME="${SCRIPT_DIR}/domainnet_cr.sh"
 MAX_JOBS="${MAX_JOBS:-10}"

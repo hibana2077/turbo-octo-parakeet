@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -P cp23
-#PBS -q gpuvolta
+#PBS -q gpuhopper
 #PBS -l ngpus=1
 #PBS -l ncpus=12
 #PBS -l mem=18GB
@@ -17,8 +17,8 @@ export HF_HOME="/scratch/cp23/lw4988/hf_home"
 export HF_HUB_OFFLINE=1
 
 TAG="domainnet_cr_jfpd_lambda_batch_sweep"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+SCRIPT_DIR="."
+PROJECT_ROOT="../.."
 EXP_FILE="${SCRIPT_DIR}/domainnet_cr.txt"
 
 IDX="${PBS_ARRAY_INDEX:-${PBS_ARRAYID:-0}}"
