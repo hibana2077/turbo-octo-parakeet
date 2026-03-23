@@ -7,7 +7,7 @@ OUT_FILE="${SCRIPT_DIR}/domainnet.txt"
 FFTAT_FILE="${PROJECT_ROOT}/fftat_script.txt"
 
 # JFPD best params (ours)
-JFPD_LAMBDA=0.0001
+JFPD_LAMBDA=0.001
 JFPD_ALPHA=0.5
 JFPD_MODE="jfpd"
 
