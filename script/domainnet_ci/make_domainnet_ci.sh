@@ -58,7 +58,7 @@ for TRAIN_BATCH_SIZE in "${TRAIN_BATCH_SIZE_VALUES[@]}"; do
     CMD+=" --use_im"
     CMD+=" --theta ${THETA}"
     CMD+=" --learning_rate ${LEARNING_RATE}"
-    CMD+=" --perturbationRatio ${PERTURBATION_RATIO}"
+    # CMD+=" --perturbationRatio ${PERTURBATION_RATIO}"
     CMD+=" --gpu_id ${GPU_ID}"
     CMD+=" --use_cp"
     CMD+=" --optimal ${OPTIMAL}"
