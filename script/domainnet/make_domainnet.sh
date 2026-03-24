@@ -7,12 +7,12 @@ OUT_FILE="${SCRIPT_DIR}/domainnet.txt"
 FFTAT_FILE="${PROJECT_ROOT}/fftat_script.txt"
 
 # JFPD best params (ours)
-JFPD_LAMBDA=0.01
+JFPD_LAMBDA=0.001
 JFPD_ALPHA=0.5
 JFPD_MODE="jfpd"
 
 # Overrides requested by us
-TRAIN_BATCH_SIZE=45
+TRAIN_BATCH_SIZE=(196 96)
 NUM_STEPS=20000
 GPU_ID=0
 
@@ -79,42 +79,44 @@ for BASELINE_LINE in "${BASELINE_LINES[@]}"; do
     WARMUP_STEPS="$DEFAULT_WARMUP_STEPS"
   fi
 
-  LAMBDA_TAG="$(float_tag "$JFPD_LAMBDA")"
-  RUN_NAME="${BASE_NAME}_jfpdl${LAMBDA_TAG}_tb${TRAIN_BATCH_SIZE}_ns${NUM_STEPS}"
-  CMD=".venv/bin/python3 main.py"
-  CMD+=" --dataset DomainNet"
-  CMD+=" --name ${RUN_NAME}"
-  CMD+=" --source_list ${SOURCE_LIST}"
-  CMD+=" --target_list ${TARGET_LIST}"
-  CMD+=" --test_list ${TEST_LIST}"
-  CMD+=" --num_classes ${NUM_CLASSES}"
-  CMD+=" --img_size ${IMG_SIZE}"
-  CMD+=" --train_batch_size ${TRAIN_BATCH_SIZE}"
-  CMD+=" --eval_batch_size ${EVAL_BATCH_SIZE}"
-  CMD+=" --num_steps ${NUM_STEPS}"
-  CMD+=" --warmup_steps ${WARMUP_STEPS}"
-  CMD+=" --learning_rate ${LEARNING_RATE}"
-  CMD+=" --gpu_id ${GPU_ID}"
-  CMD+=" --model_type ${MODEL_TYPE}"
-  CMD+=" --pretrained_dir ${PRETRAINED_DIR}"
-  CMD+=" --beta ${BETA}"
-  CMD+=" --gamma ${GAMMA}"
-  if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_im([[:space:]]|$) ]]; then
-    CMD+=" --use_im"
-  fi
-  CMD+=" --theta ${THETA}"
-  if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_cp([[:space:]]|$) ]]; then
-    CMD+=" --use_cp"
-  fi
-  if [[ -n "$OPTIMAL" ]]; then
-    CMD+=" --optimal ${OPTIMAL}"
-  fi
-  CMD+=" --use_jfpd"
-  CMD+=" --jfpd_lambda ${JFPD_LAMBDA}"
-  CMD+=" --jfpd_alpha ${JFPD_ALPHA}"
-  CMD+=" --jfpd_mode ${JFPD_MODE}"
+  for TRAIN_BATCH in "${TRAIN_BATCH_SIZE[@]}"; do
+    LAMBDA_TAG="$(float_tag "$JFPD_LAMBDA")"
+    RUN_NAME="${BASE_NAME}_jfpdl${LAMBDA_TAG}_tb${TRAIN_BATCH}_ns${NUM_STEPS}"
+    CMD=".venv/bin/python3 main.py"
+    CMD+=" --dataset DomainNet"
+    CMD+=" --name ${RUN_NAME}"
+    CMD+=" --source_list ${SOURCE_LIST}"
+    CMD+=" --target_list ${TARGET_LIST}"
+    CMD+=" --test_list ${TEST_LIST}"
+    CMD+=" --num_classes ${NUM_CLASSES}"
+    CMD+=" --img_size ${IMG_SIZE}"
+    CMD+=" --train_batch_size ${TRAIN_BATCH}"
+    CMD+=" --eval_batch_size ${EVAL_BATCH_SIZE}"
+    CMD+=" --num_steps ${NUM_STEPS}"
+    CMD+=" --warmup_steps ${WARMUP_STEPS}"
+    CMD+=" --learning_rate ${LEARNING_RATE}"
+    CMD+=" --gpu_id ${GPU_ID}"
+    CMD+=" --model_type ${MODEL_TYPE}"
+    CMD+=" --pretrained_dir ${PRETRAINED_DIR}"
+    CMD+=" --beta ${BETA}"
+    CMD+=" --gamma ${GAMMA}"
+    if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_im([[:space:]]|$) ]]; then
+      CMD+=" --use_im"
+    fi
+    CMD+=" --theta ${THETA}"
+    if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_cp([[:space:]]|$) ]]; then
+      CMD+=" --use_cp"
+    fi
+    if [[ -n "$OPTIMAL" ]]; then
+      CMD+=" --optimal ${OPTIMAL}"
+    fi
+    CMD+=" --use_jfpd"
+    CMD+=" --jfpd_lambda ${JFPD_LAMBDA}"
+    CMD+=" --jfpd_alpha ${JFPD_ALPHA}"
+    CMD+=" --jfpd_mode ${JFPD_MODE}"
 
-  printf '%s\t%s\n' "$RUN_NAME" "$CMD" >> "$OUT_FILE"
+    printf '%s\t%s\n' "$RUN_NAME" "$CMD" >> "$OUT_FILE"
+  done
 done
 
 COUNT="$(awk 'NF && $1 !~ /^#/ {count++} END {print count+0}' "$OUT_FILE")"
