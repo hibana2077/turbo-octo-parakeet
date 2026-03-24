@@ -6,18 +6,13 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUT_FILE="${SCRIPT_DIR}/domainnet.txt"
 FFTAT_FILE="${PROJECT_ROOT}/fftat_script.txt"
 
-# JFPD best params (ours)
-JFPD_LAMBDA=0.001
+# JFPD params
+JFPD_LAMBDA=0.1
 JFPD_ALPHA=0.5
 JFPD_MODE="jfpd"
 
-# Overrides requested by us
-TRAIN_BATCH_SIZE=(196 96)
-NUM_STEPS=20000
-GPU_ID=0
-
-DEFAULT_EVAL_BATCH_SIZE=16
-DEFAULT_WARMUP_STEPS=1000
+# Requested override
+TRAIN_BATCH_SIZE=190
 
 float_tag() {
   echo "$1" | sed 's/-/m/g; s/\./p/g'
@@ -61,62 +56,64 @@ for BASELINE_LINE in "${BASELINE_LINES[@]}"; do
   NUM_CLASSES="$(extract_arg "$BASELINE_LINE" "num_classes")"
   MODEL_TYPE="$(extract_arg "$BASELINE_LINE" "model_type")"
   PRETRAINED_DIR="$(extract_arg "$BASELINE_LINE" "pretrained_dir")"
+  NUM_STEPS="$(extract_arg "$BASELINE_LINE" "num_steps")"
   IMG_SIZE="$(extract_arg "$BASELINE_LINE" "img_size")"
   BETA="$(extract_arg "$BASELINE_LINE" "beta")"
   GAMMA="$(extract_arg "$BASELINE_LINE" "gamma")"
   THETA="$(extract_arg "$BASELINE_LINE" "theta")"
   LEARNING_RATE="$(extract_arg "$BASELINE_LINE" "learning_rate")"
+  GPU_ID="$(extract_arg "$BASELINE_LINE" "gpu_id" || true)"
 
   EVAL_BATCH_SIZE="$(extract_arg "$BASELINE_LINE" "eval_batch_size" || true)"
   WARMUP_STEPS="$(extract_arg "$BASELINE_LINE" "warmup_steps" || true)"
   OPTIMAL="$(extract_arg "$BASELINE_LINE" "optimal" || true)"
   PERTURBATION_RATIO="$(extract_arg "$BASELINE_LINE" "perturbationRatio" || true)"
 
-  if [[ -z "$EVAL_BATCH_SIZE" ]]; then
-    EVAL_BATCH_SIZE="$DEFAULT_EVAL_BATCH_SIZE"
+  LAMBDA_TAG="$(float_tag "$JFPD_LAMBDA")"
+  RUN_NAME="${BASE_NAME}_jfpdl${LAMBDA_TAG}_tb${TRAIN_BATCH_SIZE}"
+  CMD=".venv/bin/python3 main.py"
+  CMD+=" --dataset DomainNet"
+  CMD+=" --name ${RUN_NAME}"
+  CMD+=" --source_list ${SOURCE_LIST}"
+  CMD+=" --target_list ${TARGET_LIST}"
+  CMD+=" --test_list ${TEST_LIST}"
+  CMD+=" --num_classes ${NUM_CLASSES}"
+  CMD+=" --model_type ${MODEL_TYPE}"
+  CMD+=" --pretrained_dir ${PRETRAINED_DIR}"
+  CMD+=" --num_steps ${NUM_STEPS}"
+  CMD+=" --img_size ${IMG_SIZE}"
+  CMD+=" --beta ${BETA}"
+  CMD+=" --gamma ${GAMMA}"
+  if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_im([[:space:]]|$) ]]; then
+    CMD+=" --use_im"
   fi
-  if [[ -z "$WARMUP_STEPS" ]]; then
-    WARMUP_STEPS="$DEFAULT_WARMUP_STEPS"
+  CMD+=" --theta ${THETA}"
+  CMD+=" --learning_rate ${LEARNING_RATE}"
+  if [[ -n "$PERTURBATION_RATIO" ]]; then
+    CMD+=" --perturbationRatio ${PERTURBATION_RATIO}"
   fi
-
-  for TRAIN_BATCH in "${TRAIN_BATCH_SIZE[@]}"; do
-    LAMBDA_TAG="$(float_tag "$JFPD_LAMBDA")"
-    RUN_NAME="${BASE_NAME}_jfpdl${LAMBDA_TAG}_tb${TRAIN_BATCH}_ns${NUM_STEPS}"
-    CMD=".venv/bin/python3 main.py"
-    CMD+=" --dataset DomainNet"
-    CMD+=" --name ${RUN_NAME}"
-    CMD+=" --source_list ${SOURCE_LIST}"
-    CMD+=" --target_list ${TARGET_LIST}"
-    CMD+=" --test_list ${TEST_LIST}"
-    CMD+=" --num_classes ${NUM_CLASSES}"
-    CMD+=" --img_size ${IMG_SIZE}"
-    CMD+=" --train_batch_size ${TRAIN_BATCH}"
-    CMD+=" --eval_batch_size ${EVAL_BATCH_SIZE}"
-    CMD+=" --num_steps ${NUM_STEPS}"
-    CMD+=" --warmup_steps ${WARMUP_STEPS}"
-    CMD+=" --learning_rate ${LEARNING_RATE}"
+  if [[ -n "$GPU_ID" ]]; then
     CMD+=" --gpu_id ${GPU_ID}"
-    CMD+=" --model_type ${MODEL_TYPE}"
-    CMD+=" --pretrained_dir ${PRETRAINED_DIR}"
-    CMD+=" --beta ${BETA}"
-    CMD+=" --gamma ${GAMMA}"
-    if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_im([[:space:]]|$) ]]; then
-      CMD+=" --use_im"
-    fi
-    CMD+=" --theta ${THETA}"
-    if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_cp([[:space:]]|$) ]]; then
-      CMD+=" --use_cp"
-    fi
-    if [[ -n "$OPTIMAL" ]]; then
-      CMD+=" --optimal ${OPTIMAL}"
-    fi
-    CMD+=" --use_jfpd"
-    CMD+=" --jfpd_lambda ${JFPD_LAMBDA}"
-    CMD+=" --jfpd_alpha ${JFPD_ALPHA}"
-    CMD+=" --jfpd_mode ${JFPD_MODE}"
+  fi
+  CMD+=" --train_batch_size ${TRAIN_BATCH_SIZE}"
+  if [[ -n "$EVAL_BATCH_SIZE" ]]; then
+    CMD+=" --eval_batch_size ${EVAL_BATCH_SIZE}"
+  fi
+  if [[ "$BASELINE_LINE" =~ (^|[[:space:]])--use_cp([[:space:]]|$) ]]; then
+    CMD+=" --use_cp"
+  fi
+  if [[ -n "$OPTIMAL" ]]; then
+    CMD+=" --optimal ${OPTIMAL}"
+  fi
+  if [[ -n "$WARMUP_STEPS" ]]; then
+    CMD+=" --warmup_steps ${WARMUP_STEPS}"
+  fi
+  CMD+=" --use_jfpd"
+  CMD+=" --jfpd_lambda ${JFPD_LAMBDA}"
+  CMD+=" --jfpd_alpha ${JFPD_ALPHA}"
+  CMD+=" --jfpd_mode ${JFPD_MODE}"
 
-    printf '%s\t%s\n' "$RUN_NAME" "$CMD" >> "$OUT_FILE"
-  done
+  printf '%s\t%s\n' "$RUN_NAME" "$CMD" >> "$OUT_FILE"
 done
 
 COUNT="$(awk 'NF && $1 !~ /^#/ {count++} END {print count+0}' "$OUT_FILE")"
