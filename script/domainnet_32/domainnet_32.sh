@@ -1,10 +1,10 @@
 #!/bin/bash
 #PBS -P cp23
-#PBS -q gpuvolta
+#PBS -q gpuhopper
 #PBS -l ngpus=1
 #PBS -l ncpus=12
 #PBS -l mem=18GB
-#PBS -l walltime=20:00:00
+#PBS -l walltime=24:00:00
 #PBS -l wd
 #PBS -l storage=scratch/cp23+gdata/yp87
 #PBS -r y
